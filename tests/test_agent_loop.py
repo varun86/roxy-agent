@@ -21,6 +21,7 @@ class FakeResponsesClient(ChatCompletionsModelClient):
         tools,
         temperature=None,
         max_tokens=None,
+        on_delta=None,
     ):
         self.calls += 1
         if self.calls == 1:

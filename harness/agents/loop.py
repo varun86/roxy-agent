@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 from harness.models.types import AgentRunResult, AgentTrace, ToolCall
 from harness.tools.executor import ToolExecutor
@@ -20,6 +20,7 @@ class ChatCompletionsModelClient(Protocol):
         tools: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        on_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> tuple[str, list[ToolCall]]: ...
 
 
@@ -51,6 +52,7 @@ class OpenAIChatCompletionsClient:
         tools: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        on_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> tuple[str, list[ToolCall]]:
         kwargs: dict[str, Any] = {
             "model": model,
@@ -62,6 +64,69 @@ class OpenAIChatCompletionsClient:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+
+        if on_delta is not None:
+            kwargs["stream"] = True
+
+            stream = await self._client.chat.completions.create(**kwargs)
+
+            text_parts: list[str] = []
+            tool_parts: dict[int, dict[str, str]] = {}
+
+            async for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
+
+                content = getattr(delta, "content", None)
+                if content:
+                    text_parts.append(content)
+                    maybe_awaitable = on_delta(content)
+                    if maybe_awaitable is not None:
+                        await maybe_awaitable
+
+                delta_tool_calls = getattr(delta, "tool_calls", None) or []
+                for item in delta_tool_calls:
+                    index = getattr(item, "index", 0) or 0
+                    current = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+
+                    call_id = getattr(item, "id", None)
+                    if call_id:
+                        current["id"] = call_id
+
+                    function = getattr(item, "function", None)
+                    if function is None:
+                        continue
+
+                    function_name = getattr(function, "name", None)
+                    if function_name:
+                        current["name"] += function_name
+
+                    function_arguments = getattr(function, "arguments", None)
+                    if function_arguments:
+                        current["arguments"] += function_arguments
+
+            tool_calls: list[ToolCall] = []
+            for _, raw in sorted(tool_parts.items(), key=lambda entry: entry[0]):
+                raw_arguments = raw.get("arguments", "{}") or "{}"
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                tool_calls.append(
+                    ToolCall(
+                        id=raw.get("id", ""),
+                        name=raw.get("name", ""),
+                        arguments=arguments,
+                    )
+                )
+
+            return "".join(text_parts), tool_calls
 
         response = await self._client.chat.completions.create(**kwargs)
         message = response.choices[0].message
@@ -106,6 +171,13 @@ class AsyncAgentLoop:
         self.instructions = instructions
 
     async def run(self, user_prompt: str) -> AgentRunResult:
+        return await self._run_impl(user_prompt)
+
+    async def _run_impl(
+        self,
+        user_prompt: str,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> AgentRunResult:
         trace = AgentTrace()
 
         messages: list[ChatMessage] = []
@@ -122,6 +194,7 @@ class AsyncAgentLoop:
                 tools=self.tool_schemas,
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens,
+                on_delta=on_text_delta,
             )
 
             if text:
@@ -162,6 +235,14 @@ class AsyncAgentLoop:
         if final_text:
             timeout_text = f"{final_text}\n\n{timeout_text}"
         return AgentRunResult(text=timeout_text, trace=trace)
+
+    async def run_with_stream(
+        self,
+        user_prompt: str,
+        *,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> AgentRunResult:
+        return await self._run_impl(user_prompt, on_text_delta=on_text_delta)
 
 
 OpenAIResponsesClient = OpenAIChatCompletionsClient

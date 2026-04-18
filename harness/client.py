@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from harness.agents.loop import AsyncAgentLoop, LoopSettings, OpenAIChatCompletionsClient
 from harness.config.settings import HarnessConfig, load_harness_config
@@ -66,9 +66,17 @@ class HarnessClient:
             )
         return items
 
-    async def run_async(self, prompt: str, model_name: str | None = None) -> AgentRunResult:
+    async def run_async(
+        self,
+        prompt: str,
+        model_name: str | None = None,
+        *,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> AgentRunResult:
         agent = self._build_agent(model_name)
-        return await agent.run(prompt)
+        if on_text_delta is None:
+            return await agent.run(prompt)
+        return await agent.run_with_stream(prompt, on_text_delta=on_text_delta)
 
     def run(self, prompt: str, model_name: str | None = None) -> AgentRunResult:
         return asyncio.run(self.run_async(prompt, model_name))

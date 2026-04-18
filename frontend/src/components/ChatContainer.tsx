@@ -5,7 +5,7 @@ import { Message, ModelInfo } from "@/types/chat";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { ModelSelector } from "./ModelSelector";
-import { fetchModels, sendMessage } from "@/lib/api";
+import { fetchModels, sendMessageStream } from "@/lib/api";
 
 let messageIdCounter = 0;
 
@@ -57,24 +57,50 @@ export function ChatContainer() {
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
+    const assistantMessageId = generateMessageId();
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
+
     try {
-      const response = await sendMessage({ message: content, model: selectedModel || undefined });
-      const assistantMessage: Message = {
-        id: generateMessageId(),
-        role: "assistant",
-        content: response.text,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      await sendMessageStream(
+        { message: content, model: selectedModel || undefined },
+        {
+          onDelta: (delta) => {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, content: `${message.content}${delta}` }
+                  : message
+              )
+            );
+          },
+          onError: (error) => {
+            console.error("Stream error:", error);
+          },
+        }
+      );
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId && !message.content
+            ? { ...message, content: "(empty response)" }
+            : message
+        )
+      );
     } catch (error) {
       console.error("Error sending message:", error);
-      const errorMessage: Message = {
-        id: generateMessageId(),
-        role: "assistant",
-        content: "Sorry, I encountered an error. Please try again.",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, content: "Sorry, I encountered an error. Please try again." }
+            : message
+        )
+      );
     } finally {
       setIsLoading(false);
     }
