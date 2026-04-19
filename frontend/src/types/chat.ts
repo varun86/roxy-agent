@@ -16,9 +16,16 @@ export interface ChatResponse {
   };
 }
 
+export interface ChatHistoryMessage {
+  role: MessageRole;
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   model?: string;
+  session_id?: string;
+  messages?: ChatHistoryMessage[];
 }
 
 export interface ModelInfo {

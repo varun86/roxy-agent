@@ -1,20 +1,75 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator
+from pathlib import Path
+from typing import Any, AsyncIterator
 
 from harness.client import HarnessClient
+from harness.context import SessionContextStore
 from harness.models.types import AgentRunResult
 
 
 class ChatService:
     def __init__(self, client: HarnessClient | None = None) -> None:
-        self._client = client or HarnessClient()
+        project_root = Path(__file__).resolve().parents[2]
+        self._client = client or HarnessClient(project_root=project_root)
+        runtime = self._client.config.runtime
+        self._context_store = SessionContextStore(
+            base_dir=runtime.context_dir,
+            max_recent_messages=runtime.max_recent_messages,
+            compact_threshold_chars=runtime.compact_threshold_chars,
+            skill_memory_max=runtime.skill_memory_max,
+        )
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
-    async def run_chat(self, message: str, model: str | None = None) -> AgentRunResult:
-        return await self._client.run_async(message, model)
+    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
 
-    async def run_chat_stream(self, message: str, model: str | None = None) -> AsyncIterator[dict[str, object]]:
+    async def run_chat(
+        self,
+        message: str,
+        model: str | None = None,
+        *,
+        session_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AgentRunResult:
+        if not session_id:
+            return await self._client.run_async(message, model)
+
+        lock = self._get_session_lock(session_id)
+        async with lock:
+            context = self._context_store.load(session_id)
+            history = self._context_store.build_history(context, messages)
+
+            result = await self._client.run_async(
+                message,
+                model,
+                conversation_history=history,
+                pinned_skills=context.pinned_skills,
+                compact_summary=context.compact_summary,
+            )
+
+            self._context_store.update_after_turn(
+                context,
+                user_message=message,
+                assistant_message=result.text,
+                incoming_messages=messages,
+                available_skill_names=self._client.list_enabled_skill_names(),
+            )
+            return result
+
+    async def run_chat_stream(
+        self,
+        message: str,
+        model: str | None = None,
+        *,
+        session_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
         yield {"type": "start"}
 
         queue: asyncio.Queue[str] = asyncio.Queue()
@@ -22,19 +77,54 @@ class ChatService:
         async def on_text_delta(delta: str) -> None:
             await queue.put(delta)
 
-        task = asyncio.create_task(self._client.run_async(message, model, on_text_delta=on_text_delta))
+        if session_id:
+            lock = self._get_session_lock(session_id)
+            async with lock:
+                context = self._context_store.load(session_id)
+                history = self._context_store.build_history(context, messages)
+                task = asyncio.create_task(
+                    self._client.run_async(
+                        message,
+                        model,
+                        on_text_delta=on_text_delta,
+                        conversation_history=history,
+                        pinned_skills=context.pinned_skills,
+                        compact_summary=context.compact_summary,
+                    )
+                )
 
-        while True:
-            if task.done() and queue.empty():
-                break
+                while True:
+                    if task.done() and queue.empty():
+                        break
 
-            try:
-                delta = await asyncio.wait_for(queue.get(), timeout=0.05)
-                yield {"type": "delta", "delta": delta}
-            except TimeoutError:
-                continue
+                    try:
+                        delta = await asyncio.wait_for(queue.get(), timeout=0.05)
+                        yield {"type": "delta", "delta": delta}
+                    except TimeoutError:
+                        continue
 
-        result = await task
+                result = await task
+                self._context_store.update_after_turn(
+                    context,
+                    user_message=message,
+                    assistant_message=result.text,
+                    incoming_messages=messages,
+                    available_skill_names=self._client.list_enabled_skill_names(),
+                )
+        else:
+            task = asyncio.create_task(self._client.run_async(message, model, on_text_delta=on_text_delta))
+
+            while True:
+                if task.done() and queue.empty():
+                    break
+
+                try:
+                    delta = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield {"type": "delta", "delta": delta}
+                except TimeoutError:
+                    continue
+
+            result = await task
 
         yield {
             "type": "done",
@@ -46,7 +136,7 @@ class ChatService:
             },
         }
 
-    def list_models(self) -> list[dict[str, object]]:
+    def list_models(self) -> list[dict[str, Any]]:
         return self._client.list_models()
 
 
