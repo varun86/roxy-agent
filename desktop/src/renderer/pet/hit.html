@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roxy Hit Area</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.004);
+        }
+
+        #hit-area {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #hit-area.dragging {
+            cursor: grabbing;
+        }
+    </style>
+</head>
+<body>
+    <div id="hit-area"></div>
+    <script>
+        const hitArea = document.getElementById('hit-area');
+        const DRAG_THRESHOLD = 4;
+        const DOUBLE_CLICK_MS = 280;
+
+        let pointerDown = false;
+        let didDrag = false;
+        let pointerId = null;
+        let startX = 0;
+        let startY = 0;
+        let dragMoveRAF = null;
+        let clickTimer = null;
+        let clickCount = 0;
+
+        function queueDragMove() {
+            if (dragMoveRAF !== null) return;
+            dragMoveRAF = requestAnimationFrame(() => {
+                dragMoveRAF = null;
+                if (pointerDown && didDrag) {
+                    window.electronAPI.dragMove();
+                }
+            });
+        }
+
+        function clearPendingClick() {
+            if (clickTimer) {
+                clearTimeout(clickTimer);
+                clickTimer = null;
+            }
+            clickCount = 0;
+        }
+
+        function stopDrag(notifyEnd) {
+            if (!pointerDown && !didDrag) return;
+
+            pointerDown = false;
+            hitArea.classList.remove('dragging');
+            window.electronAPI.dragLock(false);
+
+            if (dragMoveRAF !== null) {
+                cancelAnimationFrame(dragMoveRAF);
+                dragMoveRAF = null;
+            }
+
+            if (notifyEnd && didDrag) {
+                window.electronAPI.dragEnd();
+                window.electronAPI.endDragReaction();
+            }
+
+            didDrag = false;
+            pointerId = null;
+        }
+
+        function handleClick() {
+            clickCount += 1;
+
+            if (clickCount === 2) {
+                clearPendingClick();
+                window.electronAPI.openChatDialog();
+                return;
+            }
+
+            clickTimer = setTimeout(() => {
+                clearPendingClick();
+            }, DOUBLE_CLICK_MS);
+        }
+
+        hitArea.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+
+            pointerDown = true;
+            didDrag = false;
+            pointerId = event.pointerId;
+            startX = event.clientX;
+            startY = event.clientY;
+            hitArea.setPointerCapture(event.pointerId);
+            window.electronAPI.dragLock(true);
+        });
+
+        document.addEventListener('pointermove', (event) => {
+            if (!pointerDown || event.pointerId !== pointerId) return;
+
+            if (!didDrag) {
+                const deltaX = event.clientX - startX;
+                const deltaY = event.clientY - startY;
+                if (Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD) {
+                    didDrag = true;
+                    clearPendingClick();
+                    hitArea.classList.add('dragging');
+                    window.electronAPI.startDragReaction();
+                }
+            }
+
+            if (didDrag) {
+                queueDragMove();
+            }
+        });
+
+        document.addEventListener('pointerup', (event) => {
+            if (event.button !== 0 || event.pointerId !== pointerId) return;
+
+            const wasDrag = didDrag;
+            stopDrag(true);
+            if (!wasDrag) {
+                handleClick();
+            }
+        });
+
+        hitArea.addEventListener('pointercancel', () => stopDrag(true));
+        hitArea.addEventListener('lostpointercapture', () => stopDrag(true));
+        window.addEventListener('blur', () => stopDrag(true));
+
+        document.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+        });
+    </script>
+</body>
+</html>

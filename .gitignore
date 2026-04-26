@@ -21,3 +21,8 @@ skills-lock.json
 .sandbox
 .pyctest_cache
 .runtime
+.claude
+.codex
+desktop/node_modules
+desktop/dist
+desktop/src/renderer-dist

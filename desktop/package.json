@@ -1,0 +1,59 @@
+{
+  "name": "desktop",
+  "version": "0.1.0",
+  "description": "Desktop pet for My Deer Flow - interactive AI companion",
+  "main": "src/main/main.js",
+  "scripts": {
+    "dev": "npm run build:renderer && electron .",
+    "build:renderer": "vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run build:renderer && electron-builder",
+    "build:mac": "npm run build:renderer && electron-builder --mac",
+    "build:win": "npm run build:renderer && electron-builder --win",
+    "build:linux": "npm run build:renderer && electron-builder --linux"
+  },
+  "keywords": [
+    "electron",
+    "desktop-pet",
+    "ai",
+    "chat"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^33.4.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "electron-log": "^5.3.4",
+    "koffi": "^2.15.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "build": {
+    "appId": "com.mydeerflow.deerpet",
+    "productName": "Deer Pet",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "assets/icon.icns"
+    },
+    "win": {
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "icon": "assets/icon.png"
+    }
+  }
+}

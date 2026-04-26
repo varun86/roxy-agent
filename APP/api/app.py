@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="My Deer Flow API",
-        description="Application API layer for deer-flow business endpoints.",
+        description="Application API layer for roxy-flow business endpoints.",
         version="0.1.0",
         lifespan=lifespan,
         docs_url="/swagger",

@@ -72,8 +72,8 @@ async def test_tool_registry_supports_web_search(tmp_path):
     executor = ToolExecutor(registry)
 
     result = await executor.execute_tool_call(
-        ToolCall(id="4", name="web_search", arguments={"query": "deer flow", "max_results": 3})
+        ToolCall(id="4", name="web_search", arguments={"query": "roxy flow", "max_results": 3})
     )
 
     assert result.is_error is False
-    assert result.output == "search:deer flow:3"
+    assert result.output == "search:roxy flow:3"
