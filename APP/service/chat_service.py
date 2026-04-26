@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from harness.client import HarnessClient
-from harness.context import SessionContextStore
+from harness.context import ThreadContextStore, ThreadRuntimeResolver
 from harness.models.types import AgentRunResult
 
 
@@ -14,19 +14,25 @@ class ChatService:
         project_root = Path(__file__).resolve().parents[2]
         self._client = client or HarnessClient(project_root=project_root)
         runtime = self._client.config.runtime
-        self._context_store = SessionContextStore(
+        self._context_store = ThreadContextStore(
             base_dir=runtime.context_dir,
             max_recent_messages=runtime.max_recent_messages,
             compact_threshold_chars=runtime.compact_threshold_chars,
             skill_memory_max=runtime.skill_memory_max,
         )
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._thread_runtime = ThreadRuntimeResolver(self._client.config.sandbox.root_dir)
+        self._thread_locks: dict[str, asyncio.Lock] = {}
 
-    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
-        lock = self._session_locks.get(session_id)
+    def _normalize_thread_id(self, thread_id: str | None = None) -> str | None:
+        if thread_id and thread_id.strip():
+            return thread_id.strip()
+        return None
+
+    def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
+        lock = self._thread_locks.get(thread_id)
         if lock is None:
             lock = asyncio.Lock()
-            self._session_locks[session_id] = lock
+            self._thread_locks[thread_id] = lock
         return lock
 
     async def run_chat(
@@ -34,21 +40,25 @@ class ChatService:
         message: str,
         model: str | None = None,
         *,
-        session_id: str | None = None,
+        thread_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> AgentRunResult:
-        if not session_id:
+        resolved_thread_id = self._normalize_thread_id(thread_id)
+        if not resolved_thread_id:
             return await self._client.run_async(message, model)
 
-        lock = self._get_session_lock(session_id)
+        lock = self._get_thread_lock(resolved_thread_id)
         async with lock:
-            context = self._context_store.load(session_id)
+            thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
+            context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
             history = self._context_store.build_history(context, messages)
 
             result = await self._client.run_async(
                 message,
                 model,
                 conversation_history=history,
+                thread_id=resolved_thread_id,
+                thread_paths=thread_paths,
                 pinned_skills=context.pinned_skills,
                 compact_summary=context.compact_summary,
             )
@@ -59,6 +69,7 @@ class ChatService:
                 assistant_message=result.text,
                 incoming_messages=messages,
                 available_skill_names=self._client.list_enabled_skill_names(),
+                context_path=thread_paths.context_file,
             )
             return result
 
@@ -67,7 +78,7 @@ class ChatService:
         message: str,
         model: str | None = None,
         *,
-        session_id: str | None = None,
+        thread_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[dict[str, object]]:
         yield {"type": "start"}
@@ -77,10 +88,13 @@ class ChatService:
         async def on_text_delta(delta: str) -> None:
             await queue.put(delta)
 
-        if session_id:
-            lock = self._get_session_lock(session_id)
+        resolved_thread_id = self._normalize_thread_id(thread_id)
+
+        if resolved_thread_id:
+            lock = self._get_thread_lock(resolved_thread_id)
             async with lock:
-                context = self._context_store.load(session_id)
+                thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
+                context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
                 history = self._context_store.build_history(context, messages)
                 task = asyncio.create_task(
                     self._client.run_async(
@@ -88,6 +102,8 @@ class ChatService:
                         model,
                         on_text_delta=on_text_delta,
                         conversation_history=history,
+                        thread_id=resolved_thread_id,
+                        thread_paths=thread_paths,
                         pinned_skills=context.pinned_skills,
                         compact_summary=context.compact_summary,
                     )
@@ -110,6 +126,7 @@ class ChatService:
                     assistant_message=result.text,
                     incoming_messages=messages,
                     available_skill_names=self._client.list_enabled_skill_names(),
+                    context_path=thread_paths.context_file,
                 )
         else:
             task = asyncio.create_task(self._client.run_async(message, model, on_text_delta=on_text_delta))

@@ -32,7 +32,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         result: AgentRunResult = await service.run_chat(
             request.message,
             request.model,
-            session_id=request.session_id,
+            thread_id=request.thread_id,
             messages=[item.model_dump() for item in (request.messages or [])],
         )
     except ValueError as exc:
@@ -59,7 +59,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             async for event in service.run_chat_stream(
                 request.message,
                 request.model,
-                session_id=request.session_id,
+                thread_id=request.thread_id,
                 messages=[item.model_dump() for item in (request.messages or [])],
             ):
                 yield _sse_event(event)
@@ -118,4 +118,3 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     return app
-

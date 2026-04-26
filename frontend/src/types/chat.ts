@@ -24,7 +24,7 @@ export interface ChatHistoryMessage {
 export interface ChatRequest {
   message: string;
   model?: string;
-  session_id?: string;
+  thread_id?: string;
   messages?: ChatHistoryMessage[];
 }
 

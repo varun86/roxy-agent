@@ -13,8 +13,8 @@ function generateMessageId(): string {
   return `msg-${Date.now()}-${++messageIdCounter}`;
 }
 
-function generateSessionId(): string {
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+function generateThreadId(): string {
+  return `thread-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function ChatContainer() {
@@ -24,7 +24,7 @@ export function ChatContainer() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [isModelsLoading, setIsModelsLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const sessionIdRef = useRef<string>(generateSessionId());
+  const threadIdRef = useRef<string>(generateThreadId());
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -81,7 +81,7 @@ export function ChatContainer() {
         {
           message: content,
           model: selectedModel || undefined,
-          session_id: sessionIdRef.current,
+          thread_id: threadIdRef.current,
           messages: previousMessages,
         },
         {

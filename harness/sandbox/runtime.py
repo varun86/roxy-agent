@@ -17,11 +17,22 @@ class SandboxExecutionError(SandboxError):
 
 
 class BasicSandbox:
-    def __init__(self, root_dir: Path, *, command_timeout_seconds: int = 60, max_output_chars: int = 12000) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        *,
+        command_cwd: Path | None = None,
+        command_timeout_seconds: int = 60,
+        max_output_chars: int = 12000,
+    ) -> None:
         self.root_dir = root_dir.resolve()
+        self.command_cwd = (command_cwd or self.root_dir).resolve()
         self.command_timeout_seconds = command_timeout_seconds
         self.max_output_chars = max_output_chars
+        if not self.command_cwd.is_relative_to(self.root_dir):
+            raise SandboxPermissionError(f"Command cwd is outside sandbox root: {self.command_cwd}")
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.command_cwd.mkdir(parents=True, exist_ok=True)
 
     def _truncate(self, text: str) -> str:
         if len(text) <= self.max_output_chars:
@@ -47,7 +58,7 @@ class BasicSandbox:
         completed = subprocess.run(
             command,
             shell=True,
-            cwd=self.root_dir,
+            cwd=self.command_cwd,
             capture_output=True,
             text=True,
             timeout=self.command_timeout_seconds,

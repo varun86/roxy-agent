@@ -1,31 +1,27 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+
+from harness.context.thread_runtime import normalize_thread_id
 
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _normalize_session_id(session_id: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id.strip())
-    return cleaned[:120] or "default"
-
-
 @dataclass(slots=True)
-class SessionContext:
-    session_id: str
+class ThreadContext:
+    thread_id: str
     recent_messages: list[dict[str, str]] = field(default_factory=list)
     pinned_skills: list[str] = field(default_factory=list)
     compact_summary: str = ""
     updated_at: str = field(default_factory=_utc_now_iso)
 
 
-class SessionContextStore:
+class ThreadContextStore:
     def __init__(
         self,
         *,
@@ -40,15 +36,15 @@ class SessionContextStore:
         self.compact_threshold_chars = compact_threshold_chars
         self.skill_memory_max = skill_memory_max
 
-    def load(self, session_id: str) -> SessionContext:
-        path = self._session_path(session_id)
+    def load(self, thread_id: str, *, context_path: Path | None = None) -> ThreadContext:
+        path = self._resolve_context_path(thread_id, context_path)
         if not path.exists():
-            return SessionContext(session_id=session_id)
+            return ThreadContext(thread_id=thread_id)
 
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return SessionContext(session_id=session_id)
+            return ThreadContext(thread_id=thread_id)
 
         recent_messages = self._sanitize_messages(data.get("recent_messages", []))
         pinned_skills = [item for item in data.get("pinned_skills", []) if isinstance(item, str)]
@@ -60,18 +56,19 @@ class SessionContextStore:
         if not isinstance(updated_at, str) or not updated_at:
             updated_at = _utc_now_iso()
 
-        return SessionContext(
-            session_id=session_id,
+        return ThreadContext(
+            thread_id=thread_id,
             recent_messages=recent_messages,
             pinned_skills=pinned_skills[: self.skill_memory_max],
             compact_summary=compact_summary,
             updated_at=updated_at,
         )
 
-    def save(self, context: SessionContext) -> None:
-        path = self._session_path(context.session_id)
+    def save(self, context: ThreadContext, *, context_path: Path | None = None) -> None:
+        path = self._resolve_context_path(context.thread_id, context_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "session_id": context.session_id,
+            "thread_id": context.thread_id,
             "recent_messages": self._sanitize_messages(context.recent_messages),
             "pinned_skills": context.pinned_skills[: self.skill_memory_max],
             "compact_summary": context.compact_summary,
@@ -81,7 +78,7 @@ class SessionContextStore:
 
     def build_history(
         self,
-        context: SessionContext,
+        context: ThreadContext,
         incoming_messages: list[dict[str, str]] | None = None,
     ) -> list[dict[str, str]]:
         if context.recent_messages:
@@ -90,13 +87,14 @@ class SessionContextStore:
 
     def update_after_turn(
         self,
-        context: SessionContext,
+        context: ThreadContext,
         *,
         user_message: str,
         assistant_message: str,
         incoming_messages: list[dict[str, str]] | None,
         available_skill_names: list[str],
-    ) -> SessionContext:
+        context_path: Path | None = None,
+    ) -> ThreadContext:
         source_messages = context.recent_messages or self._sanitize_messages(incoming_messages or [])
         source_messages.append({"role": "user", "content": user_message.strip()})
         source_messages.append({"role": "assistant", "content": assistant_message.strip()})
@@ -111,11 +109,16 @@ class SessionContextStore:
             context.recent_messages,
         )
         context.updated_at = _utc_now_iso()
-        self.save(context)
+        self.save(context, context_path=context_path)
         return context
 
-    def _session_path(self, session_id: str) -> Path:
-        return self.base_dir / f"{_normalize_session_id(session_id)}.json"
+    def _thread_path(self, thread_id: str) -> Path:
+        return self.base_dir / f"{normalize_thread_id(thread_id)}.json"
+
+    def _resolve_context_path(self, thread_id: str, context_path: Path | None) -> Path:
+        if context_path is not None:
+            return context_path
+        return self._thread_path(thread_id)
 
     @staticmethod
     def _sanitize_messages(raw_messages: list[dict[str, str]]) -> list[dict[str, str]]:

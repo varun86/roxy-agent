@@ -11,7 +11,7 @@ class HistoryMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     model: str | None = None
-    session_id: str | None = None
+    thread_id: str | None = None
     messages: list[HistoryMessage] | None = None
 
 

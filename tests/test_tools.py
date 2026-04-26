@@ -35,3 +35,25 @@ async def test_unknown_tool_returns_error(tmp_path):
     result = await executor.execute_tool_call(ToolCall(id="x", name="not_exists", arguments={}))
     assert result.is_error is True
     assert "Unknown tool" in result.output
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_thread_workspace_and_skills_dirs(tmp_path):
+    thread_root = tmp_path / "threads" / "t1"
+    sandbox = BasicSandbox(thread_root, command_cwd=thread_root / "workspace")
+    registry = ToolRegistry.with_default_tools(sandbox)
+    executor = ToolExecutor(registry)
+
+    workspace_result = await executor.execute_tool_call(
+        ToolCall(id="1", name="write_file", arguments={"path": "workspace/note.txt", "content": "workspace"})
+    )
+    skills_result = await executor.execute_tool_call(
+        ToolCall(id="2", name="write_file", arguments={"path": "skills/example/SKILL.md", "content": "skill"})
+    )
+    read_result = await executor.execute_tool_call(
+        ToolCall(id="3", name="read_file", arguments={"path": "skills/example/SKILL.md"})
+    )
+
+    assert workspace_result.is_error is False
+    assert skills_result.is_error is False
+    assert read_result.output == "skill"
