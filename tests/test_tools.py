@@ -6,6 +6,12 @@ from harness.models.types import ToolCall
 from harness.sandbox.runtime import BasicSandbox
 from harness.tools.executor import ToolExecutor
 from harness.tools.registry import ToolRegistry
+from harness.tools.web_search import WebSearchClient
+
+
+class FakeWebSearchClient(WebSearchClient):
+    def search(self, query: str, *, max_results: int = 5) -> str:
+        return f"search:{query}:{max_results}"
 
 
 @pytest.mark.asyncio
@@ -57,3 +63,17 @@ async def test_tool_registry_supports_thread_workspace_and_skills_dirs(tmp_path)
     assert workspace_result.is_error is False
     assert skills_result.is_error is False
     assert read_result.output == "skill"
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_web_search(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    registry = ToolRegistry.with_default_tools(sandbox, web_search_client=FakeWebSearchClient())
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute_tool_call(
+        ToolCall(id="4", name="web_search", arguments={"query": "deer flow", "max_results": 3})
+    )
+
+    assert result.is_error is False
+    assert result.output == "search:deer flow:3"

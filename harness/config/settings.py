@@ -34,7 +34,6 @@ class SandboxConfig:
 class RuntimeConfig:
     max_steps: int = 8
     max_output_chars: int = 12000
-    context_dir: Path = Path(".runtime/context")
     max_recent_messages: int = 16
     compact_threshold_chars: int = 24000
     skill_memory_max: int = 12
@@ -81,7 +80,6 @@ def load_harness_config(project_root: Path | None = None) -> HarnessConfig:
 
     max_steps = int(os.getenv("HARNESS_MAX_STEPS", "8"))
     max_output_chars = int(os.getenv("HARNESS_MAX_OUTPUT_CHARS", "12000"))
-    context_dir = Path(os.getenv("HARNESS_CONTEXT_DIR", str(root / ".runtime/context"))).resolve()
     max_recent_messages = int(os.getenv("HARNESS_CONTEXT_MAX_RECENT_MESSAGES", "16"))
     compact_threshold_chars = int(os.getenv("HARNESS_CONTEXT_COMPACT_THRESHOLD_CHARS", "24000"))
     skill_memory_max = int(os.getenv("HARNESS_CONTEXT_SKILL_MEMORY_MAX", "12"))
@@ -95,7 +93,6 @@ def load_harness_config(project_root: Path | None = None) -> HarnessConfig:
         runtime=RuntimeConfig(
             max_steps=max_steps,
             max_output_chars=max_output_chars,
-            context_dir=context_dir,
             max_recent_messages=max_recent_messages,
             compact_threshold_chars=compact_threshold_chars,
             skill_memory_max=skill_memory_max,

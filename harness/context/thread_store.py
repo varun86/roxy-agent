@@ -5,9 +5,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from harness.context.thread_runtime import normalize_thread_id
-
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -21,23 +18,28 @@ class ThreadContext:
     updated_at: str = field(default_factory=_utc_now_iso)
 
 
+def _resolve_context_path(context_path: Path | None) -> Path:
+    if context_path is None:
+        raise ValueError(
+            "context_path is required for ThreadContextStore; thread context must live in the thread sandbox"
+        )
+    return context_path
+
+
 class ThreadContextStore:
     def __init__(
         self,
         *,
-        base_dir: Path,
         max_recent_messages: int,
         compact_threshold_chars: int,
         skill_memory_max: int,
     ) -> None:
-        self.base_dir = base_dir
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.max_recent_messages = max_recent_messages
         self.compact_threshold_chars = compact_threshold_chars
         self.skill_memory_max = skill_memory_max
 
     def load(self, thread_id: str, *, context_path: Path | None = None) -> ThreadContext:
-        path = self._resolve_context_path(thread_id, context_path)
+        path = _resolve_context_path(context_path)
         if not path.exists():
             return ThreadContext(thread_id=thread_id)
 
@@ -65,7 +67,7 @@ class ThreadContextStore:
         )
 
     def save(self, context: ThreadContext, *, context_path: Path | None = None) -> None:
-        path = self._resolve_context_path(context.thread_id, context_path)
+        path = _resolve_context_path(context_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "thread_id": context.thread_id,
@@ -111,14 +113,6 @@ class ThreadContextStore:
         context.updated_at = _utc_now_iso()
         self.save(context, context_path=context_path)
         return context
-
-    def _thread_path(self, thread_id: str) -> Path:
-        return self.base_dir / f"{normalize_thread_id(thread_id)}.json"
-
-    def _resolve_context_path(self, thread_id: str, context_path: Path | None) -> Path:
-        if context_path is not None:
-            return context_path
-        return self._thread_path(thread_id)
 
     @staticmethod
     def _sanitize_messages(raw_messages: list[dict[str, str]]) -> list[dict[str, str]]:

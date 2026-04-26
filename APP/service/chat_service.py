@@ -15,7 +15,6 @@ class ChatService:
         self._client = client or HarnessClient(project_root=project_root)
         runtime = self._client.config.runtime
         self._context_store = ThreadContextStore(
-            base_dir=runtime.context_dir,
             max_recent_messages=runtime.max_recent_messages,
             compact_threshold_chars=runtime.compact_threshold_chars,
             skill_memory_max=runtime.skill_memory_max,

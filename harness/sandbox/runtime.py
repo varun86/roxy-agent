@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -14,6 +15,16 @@ class SandboxPermissionError(SandboxError):
 
 class SandboxExecutionError(SandboxError):
     """Raised when command execution fails."""
+
+
+_DANGEROUS_COMMAND_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"(^|[;&|()])\s*rm\s+-[A-Za-z]*[rf][A-Za-z]*\b", "recursive rm is not allowed"),
+    (r"(^|[;&|()])\s*sudo\b", "sudo is not allowed"),
+    (r"(^|[;&|()])\s*(shutdown|reboot|halt|poweroff)\b", "system power commands are not allowed"),
+    (r"(^|[;&|()])\s*(mkfs|fdisk|diskutil\s+eraseDisk|diskutil\s+partitionDisk)\b", "disk formatting commands are not allowed"),
+    (r"(^|[;&|()])\s*dd\b", "raw disk copy commands are not allowed"),
+    (r"(^|[;&|()])\s*mv\s+.+\s+/dev/null\b", "destructive move commands are not allowed"),
+)
 
 
 class BasicSandbox:
@@ -51,9 +62,18 @@ class BasicSandbox:
             raise SandboxPermissionError(f"Path is outside sandbox root: {user_path}")
         return resolved
 
-    def run_bash(self, command: str) -> str:
-        if not command.strip():
+    def _guard_command(self, command: str) -> None:
+        normalized = command.strip()
+        if not normalized:
             raise SandboxExecutionError("Command cannot be empty")
+
+        lowered = normalized.lower()
+        for pattern, reason in _DANGEROUS_COMMAND_PATTERNS:
+            if re.search(pattern, lowered):
+                raise SandboxPermissionError(f"Blocked dangerous command: {reason}")
+
+    def run_bash(self, command: str) -> str:
+        self._guard_command(command)
 
         completed = subprocess.run(
             command,

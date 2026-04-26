@@ -10,11 +10,10 @@ from harness.models.types import AgentRunResult
 
 
 class FakeHarnessClient:
-    def __init__(self, sandbox_root, context_dir) -> None:
+    def __init__(self, sandbox_root) -> None:
         self.config = SimpleNamespace(
             sandbox=SimpleNamespace(root_dir=sandbox_root),
             runtime=SimpleNamespace(
-                context_dir=context_dir,
                 max_recent_messages=8,
                 compact_threshold_chars=5000,
                 skill_memory_max=4,
@@ -35,7 +34,7 @@ class FakeHarnessClient:
 
 @pytest.mark.asyncio
 async def test_chat_service_routes_context_by_thread_id(tmp_path):
-    client = FakeHarnessClient(tmp_path / ".sandbox", tmp_path / ".runtime" / "context")
+    client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
 
     result = await service.run_chat("hello", thread_id="thread-a")
@@ -48,7 +47,7 @@ async def test_chat_service_routes_context_by_thread_id(tmp_path):
 
 @pytest.mark.asyncio
 async def test_chat_service_isolates_context_between_threads(tmp_path):
-    client = FakeHarnessClient(tmp_path / ".sandbox", tmp_path / ".runtime" / "context")
+    client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
 
     await service.run_chat("first", thread_id="thread-a")
@@ -59,3 +58,13 @@ async def test_chat_service_isolates_context_between_threads(tmp_path):
     assert first_context.exists()
     assert second_context.exists()
     assert first_context.read_text(encoding="utf-8") != second_context.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_chat_service_does_not_create_legacy_runtime_context_dir(tmp_path):
+    client = FakeHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+
+    await service.run_chat("hello", thread_id="thread-a")
+
+    assert not (tmp_path / ".runtime").exists()
