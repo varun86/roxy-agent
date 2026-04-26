@@ -1,9 +1,9 @@
-# RoxyDesk
+# roxy-agent
 
 <div align="center">
   <img src="desktop/assets/roxy/roxy-idle.svg" alt="Roxy - Your Desktop Companion" width="128" height="128" />
   <p>
-    <strong>RoxyDesk</strong> — 服务于洛神教的专属桌面 Agent，基于 deer-flow构建的模块化 AI Agent 运行时引擎。
+    <strong>roxy-agent</strong> — 服务于洛神教的专属桌面 Agent，基于 deer-flow构建的模块化 AI Agent 运行时引擎。
   </p>
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python">
@@ -16,7 +16,7 @@
 
 ## 项目简介
 
-RoxyDesk 是专为洛神教打造的桌面 AI Agent。它将像素风格的 Roxy ”桌宠“与强大的 Agent 能力结合，为你带来一个可交互、有灵魂的桌面助手。
+roxy-agent 是专为洛神教打造的桌面 AI Agent。它将像素风格的 Roxy ”桌宠“与强大的 Agent 能力结合，为你带来一个可交互、有灵魂的桌面助手。
 
 ### 核心特性
 
@@ -151,7 +151,7 @@ skills/
 
 ## 自定义你的桌宠
 
-想换掉 Roxy？完全可以！RoxyDesk 设计为可泛化的 IP 定制框架：
+想换掉 Roxy？完全可以！roxy-agent 设计为可泛化的 IP 定制框架：
 
 1. **替换像素资源**：将 `desktop/assets/roxy/` 下的 SVG 替换为你喜欢的角色
 2. **创建新技能**：在 `skills/custom/` 下创建新的技能目录和 `SKILL.md`
