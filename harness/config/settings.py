@@ -37,6 +37,9 @@ class RuntimeConfig:
     max_recent_messages: int = 16
     compact_threshold_chars: int = 24000
     skill_memory_max: int = 12
+    subagents_enabled: bool = True
+    max_concurrent_subagents: int = 3
+    subagent_timeout_seconds: int = 900
 
 
 @dataclass(slots=True)
@@ -83,6 +86,9 @@ def load_harness_config(project_root: Path | None = None) -> HarnessConfig:
     max_recent_messages = int(os.getenv("HARNESS_CONTEXT_MAX_RECENT_MESSAGES", "16"))
     compact_threshold_chars = int(os.getenv("HARNESS_CONTEXT_COMPACT_THRESHOLD_CHARS", "24000"))
     skill_memory_max = int(os.getenv("HARNESS_CONTEXT_SKILL_MEMORY_MAX", "12"))
+    subagents_enabled = os.getenv("HARNESS_SUBAGENTS_ENABLED", "true").lower() == "true"
+    max_concurrent_subagents = int(os.getenv("HARNESS_SUBAGENTS_MAX_CONCURRENT", "3"))
+    subagent_timeout_seconds = int(os.getenv("HARNESS_SUBAGENTS_TIMEOUT_SECONDS", "900"))
 
     return HarnessConfig(
         models=models,
@@ -96,5 +102,8 @@ def load_harness_config(project_root: Path | None = None) -> HarnessConfig:
             max_recent_messages=max_recent_messages,
             compact_threshold_chars=compact_threshold_chars,
             skill_memory_max=skill_memory_max,
+            subagents_enabled=subagents_enabled,
+            max_concurrent_subagents=max(1, max_concurrent_subagents),
+            subagent_timeout_seconds=max(1, subagent_timeout_seconds),
         ),
     )

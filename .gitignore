@@ -26,3 +26,4 @@ skills-lock.json
 desktop/node_modules
 desktop/dist
 desktop/src/renderer-dist
+/artifacts

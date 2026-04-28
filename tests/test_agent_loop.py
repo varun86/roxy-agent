@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from harness.agents.loop import AsyncAgentLoop, ChatCompletionsModelClient, LoopSettings
-from harness.models.types import ToolCall
+from harness.models.types import RuntimeContext, ToolCall
 from harness.sandbox.runtime import BasicSandbox
 from harness.tools.executor import ToolExecutor
-from harness.tools.registry import ToolRegistry
+from harness.tools.registry import ToolRegistry, ToolRuntime
 
 
 class FakeResponsesClient(ChatCompletionsModelClient):
@@ -71,7 +71,7 @@ class FakeResponsesClientWithHistory(ChatCompletionsModelClient):
 async def test_agent_loop_handles_tool_use_roundtrip(tmp_path):
     sandbox = BasicSandbox(tmp_path)
     registry = ToolRegistry.with_default_tools(sandbox)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     loop = AsyncAgentLoop(
         model_client=FakeResponsesClient(),
@@ -93,7 +93,7 @@ async def test_agent_loop_handles_tool_use_roundtrip(tmp_path):
 async def test_agent_loop_uses_history_messages(tmp_path):
     sandbox = BasicSandbox(tmp_path)
     registry = ToolRegistry.with_default_tools(sandbox)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     loop = AsyncAgentLoop(
         model_client=FakeResponsesClientWithHistory(),

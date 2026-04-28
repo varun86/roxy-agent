@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 from harness.models.types import ToolCall, ToolResult
-from harness.tools.registry import ToolRegistry
+from harness.tools.registry import ToolRegistry, ToolRuntime
 
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry, runtime: ToolRuntime) -> None:
         self.registry = registry
+        self.runtime = runtime
 
     async def execute_tool_call(self, tool_call: ToolCall) -> ToolResult:
         handler = self.registry.get_handler(tool_call.name)
@@ -18,7 +21,7 @@ class ToolExecutor:
             )
 
         try:
-            output = await handler(tool_call.arguments)
+            output = await handler(self.runtime, tool_call.arguments)
             return ToolResult(call_id=tool_call.id, output=output, is_error=False)
         except Exception as exc:  # pragma: no cover - defensive layer
             return ToolResult(
@@ -28,7 +31,4 @@ class ToolExecutor:
             )
 
     async def execute_batch(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-        results: list[ToolResult] = []
-        for call in tool_calls:
-            results.append(await self.execute_tool_call(call))
-        return results
+        return list(await asyncio.gather(*(self.execute_tool_call(call) for call in tool_calls)))

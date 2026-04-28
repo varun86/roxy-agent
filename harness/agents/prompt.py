@@ -60,12 +60,26 @@ def get_context_governance_section(
     return "\n".join(lines)
 
 
+def get_subagent_section(*, max_concurrent_subagents: int) -> str:
+    return (
+        "<subagent_system>\n"
+        "Subagent delegation is enabled.\n"
+        f"- You may launch at most {max_concurrent_subagents} task tool calls in one response.\n"
+        "- Use task only when work can be split into 2 or more meaningful parallel sub-tasks.\n"
+        "- If there are more sub-tasks than the limit, batch them across turns.\n"
+        "- Do not wrap simple or sequential work in task calls.\n"
+        "</subagent_system>"
+    )
+
+
 def build_system_instructions(
     skills: list[Skill],
     *,
     container_base_path: str = "skills",
     pinned_skills: list[str] | None = None,
     compact_summary: str | None = None,
+    subagent_enabled: bool = False,
+    max_concurrent_subagents: int = 3,
 ) -> str:
     section = get_skills_prompt_section(skills, container_base_path=container_base_path)
     context_section = get_context_governance_section(
@@ -78,4 +92,6 @@ def build_system_instructions(
         parts.append(section)
     if pinned_skills or compact_summary:
         parts.append(context_section)
+    if subagent_enabled:
+        parts.append(get_subagent_section(max_concurrent_subagents=max_concurrent_subagents))
     return "\n\n".join(parts)

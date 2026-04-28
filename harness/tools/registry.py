@@ -5,10 +5,18 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from harness.models.types import RuntimeContext
 from harness.sandbox.runtime import BasicSandbox
+from harness.subagents import (
+    MAX_CONCURRENT_SUBAGENTS,
+    SubagentExecutor,
+    SubagentResult,
+    SubagentStatus,
+    cleanup_background_task,
+    get_background_task_result,
+    get_subagent_config,
+)
 from harness.tools.web_search import WebSearchClient
-
-ToolHandler = Callable[[dict[str, Any]], Awaitable[str]]
 
 
 @dataclass(slots=True)
@@ -16,6 +24,17 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]
+
+
+@dataclass(slots=True)
+class ToolRuntime:
+    sandbox: BasicSandbox
+    context: RuntimeContext
+    emit_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
+    run_subagent: Callable[[str, str, str, int | None], Awaitable[str]] | None = None
+
+
+ToolHandler = Callable[[ToolRuntime, dict[str, Any]], Awaitable[str]]
 
 
 class ToolRegistry:
@@ -45,47 +64,70 @@ class ToolRegistry:
             )
         return schemas
 
+    def filtered(self, *, allowlist: list[str] | None = None, denylist: list[str] | None = None) -> "ToolRegistry":
+        registry = ToolRegistry()
+        for name, spec in self._specs.items():
+            allowed = allowlist is None or name in allowlist
+            denied = denylist is not None and name in denylist
+            if allowed and not denied:
+                registry.register(spec, self._handlers[name])
+        return registry
+
     @classmethod
     def with_default_tools(
         cls,
         sandbox: BasicSandbox,
         *,
         web_search_client: WebSearchClient | None = None,
+        include_task_tool: bool = False,
     ) -> "ToolRegistry":
         registry = cls()
         search_client = web_search_client or WebSearchClient()
 
-        async def bash_tool(args: dict[str, Any]) -> str:
+        async def bash_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             command = str(args.get("command", ""))
-            return await asyncio.to_thread(sandbox.run_bash, command)
+            return await asyncio.to_thread(runtime.sandbox.run_bash, command)
 
-        async def ls_tool(args: dict[str, Any]) -> str:
+        async def ls_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             path = str(args.get("path", "."))
-            return await asyncio.to_thread(sandbox.list_dir, path)
+            return await asyncio.to_thread(runtime.sandbox.list_dir, path)
 
-        async def read_file_tool(args: dict[str, Any]) -> str:
+        async def read_file_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             path = str(args.get("path", ""))
             start_line = args.get("start_line")
             end_line = args.get("end_line")
-            return await asyncio.to_thread(sandbox.read_file, path, start_line, end_line)
+            return await asyncio.to_thread(runtime.sandbox.read_file, path, start_line, end_line)
 
-        async def write_file_tool(args: dict[str, Any]) -> str:
+        async def write_file_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             path = str(args.get("path", ""))
             content = str(args.get("content", ""))
             append = bool(args.get("append", False))
-            return await asyncio.to_thread(sandbox.write_file, path, content, append)
+            return await asyncio.to_thread(runtime.sandbox.write_file, path, content, append)
 
-        async def str_replace_tool(args: dict[str, Any]) -> str:
+        async def str_replace_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             path = str(args.get("path", ""))
             old_str = str(args.get("old_str", ""))
             new_str = str(args.get("new_str", ""))
             replace_all = bool(args.get("replace_all", False))
-            return await asyncio.to_thread(sandbox.str_replace, path, old_str, new_str, replace_all)
+            return await asyncio.to_thread(runtime.sandbox.str_replace, path, old_str, new_str, replace_all)
 
-        async def web_search_tool(args: dict[str, Any]) -> str:
+        async def web_search_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             query = str(args.get("query", ""))
             max_results = int(args.get("max_results", 5))
             return await asyncio.to_thread(lambda: search_client.search(query, max_results=max_results))
+
+        async def task_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
+            if runtime.context.subagent_depth > 0:
+                raise RuntimeError("Nested subagents are disabled.")
+            if runtime.run_subagent is None:
+                raise RuntimeError("Subagent runtime is unavailable.")
+            description = str(args.get("description", "")).strip()
+            prompt = str(args.get("prompt", "")).strip()
+            subagent_type = str(args.get("subagent_type", "")).strip()
+            max_steps = args.get("max_steps")
+            if not description or not prompt or not subagent_type:
+                raise RuntimeError("task requires description, prompt, and subagent_type")
+            return await runtime.run_subagent(description, prompt, subagent_type, max_steps)
 
         registry.register(
             ToolSpec(
@@ -93,9 +135,7 @@ class ToolRegistry:
                 description="Run a shell command inside sandbox root directory.",
                 parameters={
                     "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "Shell command to run."}
-                    },
+                    "properties": {"command": {"type": "string", "description": "Shell command to run."}},
                     "required": ["command"],
                 },
             ),
@@ -105,10 +145,7 @@ class ToolRegistry:
             ToolSpec(
                 name="ls",
                 description="List directory entries.",
-                parameters={
-                    "type": "object",
-                    "properties": {"path": {"type": "string", "description": "Relative path in sandbox."}},
-                },
+                parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Relative path in sandbox."}}},
             ),
             ls_tool,
         )
@@ -169,15 +206,34 @@ class ToolRegistry:
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search query."},
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return (1-10).",
-                        },
+                        "max_results": {"type": "integer", "description": "Maximum number of results to return (1-10)."},
                     },
                     "required": ["query"],
                 },
             ),
             web_search_tool,
         )
+
+        if include_task_tool:
+            registry.register(
+                ToolSpec(
+                    name="task",
+                    description="Delegate a focused task to a subagent working in isolated context.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string"},
+                            "prompt": {"type": "string"},
+                            "subagent_type": {
+                                "type": "string",
+                                "enum": [cfg.name for cfg in [item for item in (get_subagent_config("general-purpose"), get_subagent_config("bash")) if item is not None]],
+                            },
+                            "max_steps": {"type": "integer"},
+                        },
+                        "required": ["description", "prompt", "subagent_type"],
+                    },
+                ),
+                task_tool,
+            )
 
         return registry

@@ -82,10 +82,13 @@ class ChatService:
     ) -> AsyncIterator[dict[str, object]]:
         yield {"type": "start"}
 
-        queue: asyncio.Queue[str] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
 
         async def on_text_delta(delta: str) -> None:
-            await queue.put(delta)
+            await queue.put({"type": "delta", "delta": delta})
+
+        async def on_event(event: dict[str, object]) -> None:
+            await queue.put(event)
 
         resolved_thread_id = self._normalize_thread_id(thread_id)
 
@@ -105,6 +108,7 @@ class ChatService:
                         thread_paths=thread_paths,
                         pinned_skills=context.pinned_skills,
                         compact_summary=context.compact_summary,
+                        event_callback=on_event,
                     )
                 )
 
@@ -113,8 +117,8 @@ class ChatService:
                         break
 
                     try:
-                        delta = await asyncio.wait_for(queue.get(), timeout=0.05)
-                        yield {"type": "delta", "delta": delta}
+                        event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                        yield event
                     except TimeoutError:
                         continue
 
@@ -128,15 +132,17 @@ class ChatService:
                     context_path=thread_paths.context_file,
                 )
         else:
-            task = asyncio.create_task(self._client.run_async(message, model, on_text_delta=on_text_delta))
+            task = asyncio.create_task(
+                self._client.run_async(message, model, on_text_delta=on_text_delta, event_callback=on_event)
+            )
 
             while True:
                 if task.done() and queue.empty():
                     break
 
                 try:
-                    delta = await asyncio.wait_for(queue.get(), timeout=0.05)
-                    yield {"type": "delta", "delta": delta}
+                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield event
                 except TimeoutError:
                     continue
 
@@ -149,7 +155,10 @@ class ChatService:
                 "steps": result.trace.steps,
                 "tool_calls": result.trace.tool_calls,
                 "errors": result.trace.errors,
+                "subagent_calls": result.trace.subagent_calls,
+                "subagent_errors": result.trace.subagent_errors,
             },
+            "thread_id": resolved_thread_id,
         }
 
     def list_models(self) -> list[dict[str, Any]]:
