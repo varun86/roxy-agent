@@ -19,6 +19,8 @@ class TraceInfo(BaseModel):
     steps: int
     tool_calls: int
     errors: int
+    subagent_calls: int = 0
+    subagent_errors: int = 0
 
 
 class ChatResponse(BaseModel):

@@ -46,6 +46,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             steps=result.trace.steps,
             tool_calls=result.trace.tool_calls,
             errors=result.trace.errors,
+            subagent_calls=result.trace.subagent_calls,
+            subagent_errors=result.trace.subagent_errors,
         ),
     )
 

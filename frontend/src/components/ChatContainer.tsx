@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Message, ModelInfo } from "@/types/chat";
+import { Message, ModelInfo, SubagentEvent } from "@/types/chat";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { ModelSelector } from "./ModelSelector";
@@ -93,6 +93,48 @@ export function ChatContainer() {
                   : message
               )
             );
+          },
+          onTaskEvent: (event) => {
+            setMessages((prev) => {
+              const taskId = event.task_id;
+              const existingIndex = prev.findIndex(
+                (m) => m.role === "subagent" && m.taskId === taskId
+              );
+
+              const newEvent: SubagentEvent = {
+                ...event,
+                timestamp: new Date(),
+              };
+
+              if (existingIndex !== -1) {
+                const updated = [...prev];
+                updated[existingIndex] = {
+                  ...updated[existingIndex],
+                  subagentEvents: [
+                    ...(updated[existingIndex].subagentEvents || []),
+                    newEvent,
+                  ],
+                };
+                return updated;
+              } else {
+                return [
+                  ...prev,
+                  {
+                    id: generateMessageId(),
+                    role: "subagent",
+                    content: "",
+                    timestamp: new Date(),
+                    taskId: taskId,
+                    subagentEvents: [newEvent],
+                  },
+                ];
+              }
+            });
+          },
+          onDone: ({ thread_id }) => {
+            if (thread_id) {
+              threadIdRef.current = thread_id;
+            }
           },
           onError: (error) => {
             console.error("Stream error:", error);

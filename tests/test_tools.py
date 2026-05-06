@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from harness.models.types import ToolCall
+from harness.models.types import RuntimeContext, ToolCall
 from harness.sandbox.runtime import BasicSandbox
 from harness.tools.executor import ToolExecutor
-from harness.tools.registry import ToolRegistry
+from harness.tools.registry import ToolRegistry, ToolRuntime
 from harness.tools.web_search import WebSearchClient
 
 
@@ -18,7 +18,7 @@ class FakeWebSearchClient(WebSearchClient):
 async def test_tool_registry_and_executor_roundtrip(tmp_path):
     sandbox = BasicSandbox(tmp_path)
     registry = ToolRegistry.with_default_tools(sandbox)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     write_result = await executor.execute_tool_call(
         ToolCall(id="1", name="write_file", arguments={"path": "a.txt", "content": "hello"})
@@ -36,7 +36,7 @@ async def test_tool_registry_and_executor_roundtrip(tmp_path):
 async def test_unknown_tool_returns_error(tmp_path):
     sandbox = BasicSandbox(tmp_path)
     registry = ToolRegistry.with_default_tools(sandbox)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     result = await executor.execute_tool_call(ToolCall(id="x", name="not_exists", arguments={}))
     assert result.is_error is True
@@ -48,7 +48,7 @@ async def test_tool_registry_supports_thread_workspace_and_skills_dirs(tmp_path)
     thread_root = tmp_path / "threads" / "t1"
     sandbox = BasicSandbox(thread_root, command_cwd=thread_root / "workspace")
     registry = ToolRegistry.with_default_tools(sandbox)
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     workspace_result = await executor.execute_tool_call(
         ToolCall(id="1", name="write_file", arguments={"path": "workspace/note.txt", "content": "workspace"})
@@ -69,7 +69,7 @@ async def test_tool_registry_supports_thread_workspace_and_skills_dirs(tmp_path)
 async def test_tool_registry_supports_web_search(tmp_path):
     sandbox = BasicSandbox(tmp_path)
     registry = ToolRegistry.with_default_tools(sandbox, web_search_client=FakeWebSearchClient())
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
 
     result = await executor.execute_tool_call(
         ToolCall(id="4", name="web_search", arguments={"query": "roxy flow", "max_results": 3})

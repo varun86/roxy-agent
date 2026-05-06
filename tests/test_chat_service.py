@@ -32,6 +32,26 @@ class FakeHarnessClient:
         return []
 
 
+class FakeStreamingHarnessClient(FakeHarnessClient):
+    async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
+        event_callback = kwargs.get("event_callback")
+        on_text_delta = kwargs.get("on_text_delta")
+        if event_callback is not None:
+            await event_callback(
+                {
+                    "type": "task_started",
+                    "task_id": "task_1",
+                    "description": "inspect",
+                    "subagent_type": "general-purpose",
+                }
+            )
+        if on_text_delta is not None:
+            await on_text_delta("hello")
+        if event_callback is not None:
+            await event_callback({"type": "task_completed", "task_id": "task_1", "result": "done"})
+        return AgentRunResult(text="hello")
+
+
 @pytest.mark.asyncio
 async def test_chat_service_routes_context_by_thread_id(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
@@ -68,3 +88,18 @@ async def test_chat_service_does_not_create_legacy_runtime_context_dir(tmp_path)
     await service.run_chat("hello", thread_id="thread-a")
 
     assert not (tmp_path / ".runtime").exists()
+
+
+@pytest.mark.asyncio
+async def test_chat_service_stream_emits_subagent_events(tmp_path):
+    client = FakeStreamingHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+
+    events = [event async for event in service.run_chat_stream("hello", thread_id="thread-a")]
+
+    assert events[0]["type"] == "start"
+    assert any(event["type"] == "task_started" for event in events)
+    assert any(event["type"] == "task_completed" for event in events)
+    done_event = events[-1]
+    assert done_event["type"] == "done"
+    assert done_event["trace"]["subagent_calls"] == 0

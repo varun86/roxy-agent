@@ -1,4 +1,4 @@
-import { ChatRequest, ChatResponse, ModelInfo } from "@/types/chat";
+import { ChatRequest, ChatResponse, ModelInfo, StreamTraceInfo } from "@/types/chat";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -21,7 +21,16 @@ export async function sendMessage(request: ChatRequest): Promise<ChatResponse> {
 interface StreamHandlers {
   onStart?: () => void;
   onDelta: (delta: string) => void;
-  onDone?: (payload: { text: string; trace: { steps: number; tool_calls: number; errors: number } }) => void;
+  onTaskEvent?: (event: {
+    type: "task_started" | "task_running" | "task_completed" | "task_failed" | "task_timed_out";
+    task_id: string;
+    description?: string;
+    subagent_type?: string;
+    message?: string;
+    result?: string;
+    error?: string;
+  }) => void;
+  onDone?: (payload: { text: string; trace: StreamTraceInfo; thread_id?: string }) => void;
   onError?: (error: string) => void;
 }
 
@@ -87,15 +96,38 @@ export async function sendMessageStream(request: ChatRequest, handlers: StreamHa
         delta?: string;
         error?: string;
         text?: string;
-        trace?: { steps: number; tool_calls: number; errors: number };
+        trace?: StreamTraceInfo;
+        thread_id?: string;
+        task_id?: string;
+        description?: string;
+        subagent_type?: string;
+        message?: string;
+        result?: string;
       };
 
       if (event.type === "start") {
         handlers.onStart?.();
       } else if (event.type === "delta" && typeof event.delta === "string") {
         handlers.onDelta(event.delta);
+      } else if (
+        (event.type === "task_started" ||
+          event.type === "task_running" ||
+          event.type === "task_completed" ||
+          event.type === "task_failed" ||
+          event.type === "task_timed_out") &&
+        typeof event.task_id === "string"
+      ) {
+        handlers.onTaskEvent?.({
+          type: event.type,
+          task_id: event.task_id,
+          description: event.description,
+          subagent_type: event.subagent_type,
+          message: event.message,
+          result: event.result,
+          error: event.error,
+        });
       } else if (event.type === "done" && typeof event.text === "string" && event.trace) {
-        handlers.onDone?.({ text: event.text, trace: event.trace });
+        handlers.onDone?.({ text: event.text, trace: event.trace, thread_id: event.thread_id });
       } else if (event.type === "error") {
         handlers.onError?.(event.error ?? "Unknown stream error");
         throw new Error(event.error ?? "Unknown stream error");

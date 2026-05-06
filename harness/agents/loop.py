@@ -164,12 +164,21 @@ class AsyncAgentLoop:
         tool_schemas: list[dict[str, Any]],
         settings: LoopSettings,
         instructions: str | None = None,
+        max_concurrent_subagents: int = 3,
     ) -> None:
         self.model_client = model_client
         self.tool_executor = tool_executor
         self.tool_schemas = tool_schemas
         self.settings = settings
         self.instructions = instructions
+        self.max_concurrent_subagents = max(1, max_concurrent_subagents)
+
+    def _truncate_subagent_calls(self, tool_calls: list[ToolCall]) -> tuple[list[ToolCall], int]:
+        task_indices = [index for index, call in enumerate(tool_calls) if call.name == "task"]
+        if len(task_indices) <= self.max_concurrent_subagents:
+            return tool_calls, 0
+        drop_indices = set(task_indices[self.max_concurrent_subagents :])
+        return [call for index, call in enumerate(tool_calls) if index not in drop_indices], len(drop_indices)
 
     async def run(
         self,
@@ -240,6 +249,10 @@ class AsyncAgentLoop:
             if text:
                 final_text = text
 
+            tool_calls, dropped_subagents = self._truncate_subagent_calls(tool_calls)
+            if dropped_subagents:
+                trace.subagent_errors += dropped_subagents
+
             assistant_message: ChatMessage = {"role": "assistant", "content": text or None}
             if tool_calls:
                 assistant_message["tool_calls"] = [
@@ -259,8 +272,12 @@ class AsyncAgentLoop:
                 return AgentRunResult(text=final_text or "(empty response)", trace=trace)
 
             trace.tool_calls += len(tool_calls)
+            trace.subagent_calls += sum(1 for call in tool_calls if call.name == "task")
             tool_results = await self.tool_executor.execute_batch(tool_calls)
             trace.errors += sum(1 for result in tool_results if result.is_error)
+            trace.subagent_errors += sum(
+                1 for call, result in zip(tool_calls, tool_results, strict=False) if call.name == "task" and result.is_error
+            )
 
             messages.extend(
                 {
