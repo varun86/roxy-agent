@@ -69,7 +69,10 @@ class FakeResponsesClientWithHistory(ChatCompletionsModelClient):
 
 class FakeKnowledgeBaseService:
     def render_search_results(self, query: str, *, top_k: int | None = None) -> str:
-        return f"Knowledge base results for: {query}\n1. title=退款政策 source=refund.md score=0.9900 text=支持 7 天退款"
+        return (
+            f"Knowledge base results for: {query}\n"
+            "1. title=退款政策 source=refund.md hybrid_score=0.9900 rerank_score=0.9950 text=支持 7 天退款"
+        )
 
 
 class FakeResponsesClientWithKnowledgeSearch(ChatCompletionsModelClient):

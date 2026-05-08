@@ -16,7 +16,7 @@ class FakeWebSearchClient(WebSearchClient):
 
 class FakeKnowledgeBaseService:
     def render_search_results(self, query: str, *, top_k: int | None = None) -> str:
-        return f"kb:{query}:{top_k}"
+        return f"Knowledge base results for: {query}\n1. title=退款政策 source=refund.md hybrid_score=0.9000 rerank_score=0.9500 text=支持 7 天退款"
 
 
 @pytest.mark.asyncio
@@ -95,4 +95,5 @@ async def test_tool_registry_supports_knowledge_search(tmp_path):
     )
 
     assert result.is_error is False
-    assert result.output == "kb:退款政策:2"
+    assert "hybrid_score=0.9000" in result.output
+    assert "rerank_score=0.9500" in result.output

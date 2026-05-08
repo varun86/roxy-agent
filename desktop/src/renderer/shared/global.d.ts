@@ -32,6 +32,7 @@ interface ElectronAPI {
   openChatDialog: () => void;
   closeDialog: () => void;
   minimizeDialog: () => void;
+  setDialogChatBusy: (active: boolean) => void;
   notifyDialogInputFocus: () => void;
   notifyDialogInputBlur: () => void;
   onStateChange: (callback: (state: PetState, svgPath: string) => void) => void;

@@ -33,6 +33,8 @@ type ConversationTurn = {
   id: string;
   userText: string;
   assistantText: string;
+  reasoningText: string;
+  finalAnswerText: string;
   isStreaming: boolean;
   isError: boolean;
   previewText: string;
@@ -54,6 +56,50 @@ function toPreviewText(userText: string, assistantText: string) {
   return `你：${userPreview}`;
 }
 
+function parseAssistantContent(rawText: string) {
+  const text = rawText.trim();
+  if (!text) {
+    return {
+      reasoningText: "",
+      finalAnswerText: "",
+    };
+  }
+
+  const taggedPatterns = [
+    /<think>([\s\S]*?)<\/think>\s*([\s\S]*)/i,
+    /<analysis>([\s\S]*?)<\/analysis>\s*([\s\S]*)/i,
+  ];
+
+  for (const pattern of taggedPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        reasoningText: match[1]?.trim() ?? "",
+        finalAnswerText: match[2]?.trim() ?? "",
+      };
+    }
+  }
+
+  const headingPatterns = [
+    /(?:^|\n)(?:thinking|thought process|analysis|思考过程|推理过程)[:：]\s*([\s\S]*?)(?:\n(?:final answer|answer|最终答案|结论)[:：]\s*)([\s\S]*)$/i,
+  ];
+
+  for (const pattern of headingPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        reasoningText: match[1]?.trim() ?? "",
+        finalAnswerText: match[2]?.trim() ?? "",
+      };
+    }
+  }
+
+  return {
+    reasoningText: "",
+    finalAnswerText: text,
+  };
+}
+
 function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
   const historyMessages = messages.filter((message) => message.includeInHistory !== false);
   const turns: ConversationTurn[] = [];
@@ -61,13 +107,16 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
 
   for (const message of historyMessages) {
     if (message.role === "user") {
+      const parsedAssistant = parseAssistantContent("");
       currentTurn = {
         id: message.id,
         userText: message.content,
         assistantText: "",
+        reasoningText: parsedAssistant.reasoningText,
+        finalAnswerText: parsedAssistant.finalAnswerText,
         isStreaming: true,
         isError: false,
-        previewText: toPreviewText(message.content, ""),
+        previewText: toPreviewText(message.content, parsedAssistant.finalAnswerText),
         toolEvents: [],
         trace: null,
       };
@@ -76,13 +125,16 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
     }
 
     if (!currentTurn) {
+      const parsedAssistant = parseAssistantContent(message.content);
       currentTurn = {
         id: message.id,
         userText: "",
         assistantText: message.content,
+        reasoningText: parsedAssistant.reasoningText,
+        finalAnswerText: parsedAssistant.finalAnswerText,
         isStreaming: false,
         isError: Boolean(message.isError),
-        previewText: toPreviewText("", message.content),
+        previewText: toPreviewText("", parsedAssistant.finalAnswerText),
         toolEvents: message.toolEvents ?? [],
         trace: message.trace ?? null,
       };
@@ -91,17 +143,20 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
       continue;
     }
 
+    const parsedAssistant = parseAssistantContent(message.content);
     currentTurn.assistantText = message.content;
+    currentTurn.reasoningText = parsedAssistant.reasoningText;
+    currentTurn.finalAnswerText = parsedAssistant.finalAnswerText;
     currentTurn.isError = Boolean(message.isError);
     currentTurn.isStreaming = false;
-    currentTurn.previewText = toPreviewText(currentTurn.userText, message.content);
+    currentTurn.previewText = toPreviewText(currentTurn.userText, parsedAssistant.finalAnswerText);
     currentTurn.toolEvents = message.toolEvents ?? [];
     currentTurn.trace = message.trace ?? null;
     currentTurn = null;
   }
 
   if (currentTurn) {
-    currentTurn.previewText = toPreviewText(currentTurn.userText, currentTurn.assistantText);
+    currentTurn.previewText = toPreviewText(currentTurn.userText, currentTurn.finalAnswerText);
   }
 
   return turns;
@@ -117,6 +172,7 @@ export default function DialogApp() {
   const [trace, setTrace] = useState<TraceSummary | null>(null);
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const [expandedToolIds, setExpandedToolIds] = useState<Record<string, boolean>>({});
+  const [showReasoning, setShowReasoning] = useState(false);
 
   const messagesContainerRef = useRef<HTMLElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -176,6 +232,7 @@ export default function DialogApp() {
 
   useEffect(() => {
     setExpandedToolIds({});
+    setShowReasoning(false);
   }, [selectedTurnId]);
 
   useEffect(() => {
@@ -303,6 +360,7 @@ export default function DialogApp() {
     let hasFinalizedAssistantMessage = false;
     setIsStreaming(true);
     setTrace(null);
+    window.electronAPI.setDialogChatBusy(true);
 
     const userMessageId = createId("user");
     pushMessage({
@@ -384,6 +442,7 @@ export default function DialogApp() {
         });
       }
     } finally {
+      window.electronAPI.setDialogChatBusy(false);
       setShowTyping(false);
       setIsStreaming(false);
       setInputValue("");
@@ -571,9 +630,33 @@ export default function DialogApp() {
                   </section>
 
                   <section className={`detail-bubble detail-assistant${selectedTurn.isError ? " error" : ""}`}>
-                    <div className="detail-label detail-label-roxy">ROXY</div>
-                    <div className="detail-text">
-                      {selectedTurn.assistantText || (selectedTurn.isStreaming ? "Roxy 正在继续写下回答..." : "(empty response)")}
+                    {selectedTurn.reasoningText ? (
+                      <div className="reasoning-panel">
+                        <button
+                          type="button"
+                          className="reasoning-toggle"
+                          onClick={() => setShowReasoning((prev) => !prev)}
+                          aria-expanded={showReasoning}
+                        >
+                          <span className="detail-label detail-label-thinking">THINK</span>
+                          <span className="reasoning-summary">
+                            {showReasoning ? "收起思考过程" : "展开思考过程"}
+                          </span>
+                          <span className={`reasoning-chevron${showReasoning ? " expanded" : ""}`}>⌄</span>
+                        </button>
+                        {showReasoning ? (
+                          <div className="reasoning-body">
+                            <div className="detail-text detail-text-muted">{selectedTurn.reasoningText}</div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div className="answer-panel">
+                      <div className="detail-label detail-label-roxy">FINAL ANSWER</div>
+                      <div className="detail-text">
+                        {selectedTurn.finalAnswerText || selectedTurn.assistantText || (selectedTurn.isStreaming ? "Roxy 正在继续写下回答..." : "(empty response)")}
+                      </div>
                     </div>
                   </section>
 

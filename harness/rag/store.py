@@ -14,36 +14,58 @@ from harness.rag.chunker import DocumentChunk
 @dataclass(slots=True)
 class SearchResult:
     chunk: DocumentChunk
-    score: float
+    hybrid_score: float
+    rerank_score: float | None = None
 
 
 class QdrantVectorStore:
+    DENSE_VECTOR_NAME = "dense"
+    SPARSE_VECTOR_NAME = "sparse"
+
     def __init__(self, client: QdrantClient, collection_name: str) -> None:
         self.client = client
         self.collection_name = collection_name
 
-    def ensure_collection(self, vector_size: int) -> None:
+    def collection_exists(self) -> bool:
         collections = self.client.get_collections().collections
-        existing = {item.name for item in collections}
-        if self.collection_name in existing:
-            return
+        return self.collection_name in {item.name for item in collections}
+
+    def recreate_collection(self, dense_vector_size: int) -> None:
+        if self.collection_exists():
+            self.client.delete_collection(collection_name=self.collection_name)
         self.client.create_collection(
             collection_name=self.collection_name,
-            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+            vectors_config={
+                self.DENSE_VECTOR_NAME: models.VectorParams(
+                    size=dense_vector_size,
+                    distance=models.Distance.COSINE,
+                )
+            },
+            sparse_vectors_config={
+                self.SPARSE_VECTOR_NAME: models.SparseVectorParams(modifier=models.Modifier.IDF)
+            },
         )
 
-    def upsert(self, chunks: list[DocumentChunk], vectors: list[list[float]]) -> int:
+    def upsert(
+        self,
+        chunks: list[DocumentChunk],
+        dense_vectors: list[list[float]],
+        sparse_vectors: list[models.SparseVector],
+    ) -> int:
         if not chunks:
             return 0
-        if len(chunks) != len(vectors):
-            raise ValueError("Chunk count must match vector count.")
+        if len(chunks) != len(dense_vectors) or len(chunks) != len(sparse_vectors):
+            raise ValueError("Chunk count must match dense and sparse vector counts.")
 
-        self.ensure_collection(len(vectors[0]))
+        self.recreate_collection(len(dense_vectors[0]))
         timestamp = datetime.now(UTC).isoformat()
         points = [
             models.PointStruct(
                 id=str(uuid5(NAMESPACE_URL, chunk.chunk_id)),
-                vector=vector,
+                vector={
+                    self.DENSE_VECTOR_NAME: dense_vector,
+                    self.SPARSE_VECTOR_NAME: sparse_vector,
+                },
                 payload={
                     "chunk_id": chunk.chunk_id,
                     "source_path": chunk.source_path,
@@ -52,15 +74,36 @@ class QdrantVectorStore:
                     "updated_at": timestamp,
                 },
             )
-            for chunk, vector in zip(chunks, vectors, strict=True)
+            for chunk, dense_vector, sparse_vector in zip(chunks, dense_vectors, sparse_vectors, strict=True)
         ]
         self.client.upsert(collection_name=self.collection_name, points=points, wait=True)
         return len(points)
 
-    def search(self, query_vector: list[float], *, limit: int) -> list[SearchResult]:
+    def search_hybrid(
+        self,
+        dense_query_vector: list[float],
+        sparse_query_vector: models.SparseVector,
+        *,
+        dense_limit: int,
+        sparse_limit: int,
+        limit: int,
+        fusion: models.Fusion,
+    ) -> list[SearchResult]:
         response = self.client.query_points(
             collection_name=self.collection_name,
-            query=query_vector,
+            prefetch=[
+                models.Prefetch(
+                    query=sparse_query_vector,
+                    using=self.SPARSE_VECTOR_NAME,
+                    limit=sparse_limit,
+                ),
+                models.Prefetch(
+                    query=dense_query_vector,
+                    using=self.DENSE_VECTOR_NAME,
+                    limit=dense_limit,
+                ),
+            ],
+            query=models.FusionQuery(fusion=fusion),
             limit=limit,
             with_payload=True,
         )
@@ -75,7 +118,7 @@ class QdrantVectorStore:
                         title=str(payload.get("title", "")),
                         text=str(payload.get("text", "")),
                     ),
-                    score=float(item.score),
+                    hybrid_score=float(item.score),
                 )
             )
         return results

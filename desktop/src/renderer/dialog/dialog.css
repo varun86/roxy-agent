@@ -569,6 +569,10 @@ body {
   color: rgba(255, 224, 182, 0.52);
 }
 
+.detail-label-thinking {
+  color: rgba(138, 164, 255, 0.76);
+}
+
 .detail-label-tools {
   color: rgba(159, 240, 203, 0.72);
 }
@@ -579,6 +583,66 @@ body {
   font-size: 13px;
   line-height: 1.75;
   color: var(--text);
+}
+
+.detail-text-muted {
+  color: rgba(255, 242, 222, 0.82);
+}
+
+.reasoning-panel {
+  margin-bottom: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(138, 164, 255, 0.16);
+  background: rgba(41, 52, 94, 0.22);
+  overflow: hidden;
+}
+
+.reasoning-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.reasoning-toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.reasoning-summary {
+  flex: 1;
+  min-width: 0;
+  color: rgba(231, 237, 255, 0.74);
+  font-size: 11px;
+}
+
+.reasoning-chevron {
+  flex-shrink: 0;
+  color: rgba(231, 237, 255, 0.66);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 180ms ease;
+}
+
+.reasoning-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.reasoning-body {
+  border-top: 1px solid rgba(138, 164, 255, 0.12);
+  padding: 0 12px 12px;
+}
+
+.answer-panel {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 224, 182, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
 }
 
 .detail-tools {
