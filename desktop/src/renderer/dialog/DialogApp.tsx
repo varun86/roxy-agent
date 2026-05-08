@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import attentionSvg from "../../../assets/roxy/roxy-attention.svg";
 import roxyBackgroundPng from "../../../assets/roxy/roxy-background.png";
 import thinkingSvg from "../../../assets/roxy/roxy-thinking.svg";
@@ -11,12 +11,22 @@ type TraceSummary = {
   errors: number;
 };
 
+type ToolCallEvent = {
+  callId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  output: string;
+  isError: boolean;
+};
+
 type ChatMessage = {
   id: string;
   role: MessageRole;
   content: string;
   isError?: boolean;
   includeInHistory?: boolean;
+  toolEvents?: ToolCallEvent[];
+  trace?: TraceSummary | null;
 };
 
 type ConversationTurn = {
@@ -26,6 +36,8 @@ type ConversationTurn = {
   isStreaming: boolean;
   isError: boolean;
   previewText: string;
+  toolEvents: ToolCallEvent[];
+  trace: TraceSummary | null;
 };
 
 function createId(prefix: string) {
@@ -56,6 +68,8 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
         isStreaming: true,
         isError: false,
         previewText: toPreviewText(message.content, ""),
+        toolEvents: [],
+        trace: null,
       };
       turns.push(currentTurn);
       continue;
@@ -69,6 +83,8 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
         isStreaming: false,
         isError: Boolean(message.isError),
         previewText: toPreviewText("", message.content),
+        toolEvents: message.toolEvents ?? [],
+        trace: message.trace ?? null,
       };
       turns.push(currentTurn);
       currentTurn = null;
@@ -79,6 +95,8 @@ function buildConversationTurns(messages: ChatMessage[]): ConversationTurn[] {
     currentTurn.isError = Boolean(message.isError);
     currentTurn.isStreaming = false;
     currentTurn.previewText = toPreviewText(currentTurn.userText, message.content);
+    currentTurn.toolEvents = message.toolEvents ?? [];
+    currentTurn.trace = message.trace ?? null;
     currentTurn = null;
   }
 
@@ -98,6 +116,7 @@ export default function DialogApp() {
   const [showTyping, setShowTyping] = useState(false);
   const [trace, setTrace] = useState<TraceSummary | null>(null);
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
+  const [expandedToolIds, setExpandedToolIds] = useState<Record<string, boolean>>({});
 
   const messagesContainerRef = useRef<HTMLElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -156,7 +175,11 @@ export default function DialogApp() {
   }, [selectedTurn, selectedTurnId]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    setExpandedToolIds({});
+  }, [selectedTurnId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setSelectedTurnId(null);
       }
@@ -240,6 +263,16 @@ export default function DialogApp() {
     }));
   };
 
+  const appendToolEvent = (event: ToolCallEvent) => {
+    const streamMessageId = streamingMessageIdRef.current;
+    if (!streamMessageId) return;
+
+    updateMessage(streamMessageId, (message) => ({
+      ...message,
+      toolEvents: [...(message.toolEvents ?? []), event],
+    }));
+  };
+
   const finalizeAssistantMessage = (finalText: string, nextTrace: TraceSummary | null) => {
     const streamMessageId = streamingMessageIdRef.current;
 
@@ -247,12 +280,14 @@ export default function DialogApp() {
       updateMessage(streamMessageId, (message) => ({
         ...message,
         content: finalText || "(empty response)",
+        trace: nextTrace,
       }));
     } else if (finalText) {
       pushMessage({
         id: createId("assistant"),
         role: "assistant",
         content: finalText,
+        trace: nextTrace,
       });
     }
 
@@ -265,6 +300,7 @@ export default function DialogApp() {
 
     assistantTextContentRef.current = "";
     streamingMessageIdRef.current = null;
+    let hasFinalizedAssistantMessage = false;
     setIsStreaming(true);
     setTrace(null);
 
@@ -294,6 +330,17 @@ export default function DialogApp() {
           continue;
         }
 
+        if (event.type === "tool_called") {
+          appendToolEvent({
+            callId: typeof event.call_id === "string" && event.call_id ? event.call_id : createId("tool"),
+            toolName: typeof event.tool_name === "string" && event.tool_name ? event.tool_name : "unknown_tool",
+            arguments: event.arguments && typeof event.arguments === "object" ? event.arguments : {},
+            output: typeof event.output === "string" ? event.output : "",
+            isError: Boolean(event.is_error),
+          });
+          continue;
+        }
+
         if (event.type === "done") {
           if (event.thread_id) {
             threadIdRef.current = event.thread_id;
@@ -302,6 +349,7 @@ export default function DialogApp() {
             typeof event.text === "string" && event.text ? event.text : assistantTextContentRef.current,
             event.trace ?? null
           );
+          hasFinalizedAssistantMessage = true;
           continue;
         }
 
@@ -310,9 +358,9 @@ export default function DialogApp() {
         }
       }
 
-      if (streamingMessageIdRef.current) {
+      if (!hasFinalizedAssistantMessage && streamingMessageIdRef.current) {
         finalizeAssistantMessage(assistantTextContentRef.current, null);
-      } else if (assistantTextContentRef.current) {
+      } else if (!hasFinalizedAssistantMessage && assistantTextContentRef.current) {
         pushMessage({
           id: createId("assistant"),
           role: "assistant",
@@ -348,18 +396,25 @@ export default function DialogApp() {
     await sendMessage(inputValue.trim());
   };
 
-  const handleInputKeyDown = async (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleInputKeyDown = async (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       await sendMessage(inputValue.trim());
     }
   };
 
-  const handleTurnKeyDown = (event: KeyboardEvent<HTMLButtonElement>, turnId: string) => {
+  const handleTurnKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, turnId: string) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       setSelectedTurnId(turnId);
     }
+  };
+
+  const toggleToolDetails = (callId: string) => {
+    setExpandedToolIds((prev) => ({
+      ...prev,
+      [callId]: !prev[callId],
+    }));
   };
 
   return (
@@ -411,9 +466,16 @@ export default function DialogApp() {
                 <img src={attentionSvg} alt="" aria-hidden="true" />
                 <div className="turn-bubble-copy">
                   <p className="turn-preview">{turn.previewText}</p>
-                  <span className="turn-meta">
-                    {turn.isStreaming ? "对白生成中..." : `第 ${index + 1} 轮对白`}
-                  </span>
+                  <div className="turn-meta-row">
+                    <span className="turn-meta">
+                      {turn.isStreaming ? "对白生成中..." : `第 ${index + 1} 轮对白`}
+                    </span>
+                    {turn.toolEvents.length > 0 ? (
+                      <span className="turn-tool-pill">
+                        {turn.toolEvents.length} 次 tool call
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </button>
             ))}
@@ -479,31 +541,96 @@ export default function DialogApp() {
           onClick={() => setSelectedTurnId(null)}
         >
           <div className="turn-overlay-content" role="dialog" aria-modal="true" aria-labelledby="turn-dialog-title" onClick={(event) => event.stopPropagation()}>
-            <button
-              type="button"
-              className="overlay-close-btn"
-              aria-label="Close detail view"
-              onClick={() => setSelectedTurnId(null)}
-            >
-              <span />
-            </button>
-
             {selectedTurn ? (
               <>
-                <p id="turn-dialog-title" className="overlay-title">
-                  这一轮完整对白
-                </p>
-                <section className="detail-bubble detail-user">
-                  <div className="detail-label">YOU</div>
-                  <div className="detail-text">{selectedTurn.userText || "这一轮没有用户输入。"}</div>
-                </section>
-
-                <section className={`detail-bubble detail-assistant${selectedTurn.isError ? " error" : ""}`}>
-                  <div className="detail-label detail-label-roxy">ROXY</div>
-                  <div className="detail-text">
-                    {selectedTurn.assistantText || (selectedTurn.isStreaming ? "Roxy 正在继续写下回答..." : "(empty response)")}
+                <div className="overlay-header">
+                  <div>
+                    <p id="turn-dialog-title" className="overlay-title">
+                      这一轮完整对白
+                    </p>
+                    <p className="overlay-subtitle">
+                      {selectedTurn.trace
+                        ? `Steps ${selectedTurn.trace.steps} · Tool calls ${selectedTurn.trace.tool_calls} · Errors ${selectedTurn.trace.errors}`
+                        : "查看本轮完整回复与执行细节"}
+                    </p>
                   </div>
-                </section>
+                  <button
+                    type="button"
+                    className="overlay-close-btn"
+                    aria-label="Close detail view"
+                    onClick={() => setSelectedTurnId(null)}
+                  >
+                    <span />
+                  </button>
+                </div>
+
+                <div className="overlay-body">
+                  <section className="detail-bubble detail-user">
+                    <div className="detail-label">YOU</div>
+                    <div className="detail-text">{selectedTurn.userText || "这一轮没有用户输入。"}</div>
+                  </section>
+
+                  <section className={`detail-bubble detail-assistant${selectedTurn.isError ? " error" : ""}`}>
+                    <div className="detail-label detail-label-roxy">ROXY</div>
+                    <div className="detail-text">
+                      {selectedTurn.assistantText || (selectedTurn.isStreaming ? "Roxy 正在继续写下回答..." : "(empty response)")}
+                    </div>
+                  </section>
+
+                  {selectedTurn.toolEvents.length > 0 ? (
+                    <section className="detail-bubble detail-tools">
+                      <div className="detail-tools-header">
+                        <div>
+                          <div className="detail-label detail-label-tools">TOOL CALLS</div>
+                          <p className="detail-tools-summary">
+                            点击展开
+                          </p>
+                        </div>
+                        <span className="tool-count-badge">{selectedTurn.toolEvents.length}</span>
+                      </div>
+
+                      <div className="tool-list">
+                        {selectedTurn.toolEvents.map((toolEvent, toolIndex) => {
+                          const isExpanded = Boolean(expandedToolIds[toolEvent.callId]);
+                          return (
+                            <article key={toolEvent.callId} className={`tool-card${toolEvent.isError ? " error" : ""}`}>
+                              <button
+                                type="button"
+                                className="tool-card-trigger"
+                                onClick={() => toggleToolDetails(toolEvent.callId)}
+                                aria-expanded={isExpanded}
+                              >
+                                <div className="tool-card-main">
+                                  <span className={`tool-status-dot${toolEvent.isError ? " error" : ""}`} />
+                                  <div className="tool-card-copy">
+                                    <span className="tool-card-title">{toolEvent.toolName}</span>
+                                    <span className="tool-card-meta">
+                                      Tool #{toolIndex + 1} · {Object.keys(toolEvent.arguments).length} args
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className={`tool-chevron${isExpanded ? " expanded" : ""}`}>⌄</span>
+                              </button>
+
+                              {isExpanded ? (
+                                <div className="tool-card-details">
+                                  <div className="tool-code-block">
+                                    <span className="tool-code-label">Arguments</span>
+                                    <pre>{JSON.stringify(toolEvent.arguments, null, 2)}</pre>
+                                  </div>
+                                  <div className="tool-code-block">
+                                    <span className="tool-code-label">Output</span>
+                                    <pre>{toolEvent.output || "(empty output)"}</pre>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
               </>
             ) : null}
           </div>

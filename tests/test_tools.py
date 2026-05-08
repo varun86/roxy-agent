@@ -14,6 +14,11 @@ class FakeWebSearchClient(WebSearchClient):
         return f"search:{query}:{max_results}"
 
 
+class FakeKnowledgeBaseService:
+    def render_search_results(self, query: str, *, top_k: int | None = None) -> str:
+        return f"kb:{query}:{top_k}"
+
+
 @pytest.mark.asyncio
 async def test_tool_registry_and_executor_roundtrip(tmp_path):
     sandbox = BasicSandbox(tmp_path)
@@ -77,3 +82,17 @@ async def test_tool_registry_supports_web_search(tmp_path):
 
     assert result.is_error is False
     assert result.output == "search:roxy flow:3"
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_knowledge_search(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    registry = ToolRegistry.with_default_tools(sandbox, knowledge_base=FakeKnowledgeBaseService())
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
+
+    result = await executor.execute_tool_call(
+        ToolCall(id="5", name="knowledge_search", arguments={"query": "退款政策", "top_k": 2})
+    )
+
+    assert result.is_error is False
+    assert result.output == "kb:退款政策:2"
