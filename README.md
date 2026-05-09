@@ -190,7 +190,7 @@ skills/
 
 ## 自定义你的桌宠
 
-想换掉 Roxy？完全可以！roxy-agent 设计为可泛化的 IP 定制框架：
+想换掉 Roxy？完全可以！roxy-agent设计为可泛化的IP定制框架：
 
 1. **替换像素资源**：将 `desktop/assets/roxy/` 下的 SVG 替换为你喜欢的角色
 2. **创建新技能**：在 `skills/custom/` 下创建新的技能目录和 `SKILL.md`
