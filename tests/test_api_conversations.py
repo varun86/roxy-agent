@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +20,16 @@ class FakeHarnessClient:
                 compact_threshold_chars=5000,
                 skill_memory_max=4,
             ),
+            memory=SimpleNamespace(
+                enabled=True,
+                debounce_seconds=30,
+                storage_path=sandbox_root / "memory.json",
+                model_name=None,
+                max_facts=100,
+                fact_confidence_threshold=0.7,
+                injection_enabled=True,
+                max_injection_tokens=1200,
+            ),
         )
 
     async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
@@ -35,29 +46,31 @@ def test_conversation_endpoints_work(tmp_path):
     service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
     app_module._service = service
     client = TestClient(create_app())
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
 
-    create_response = client.post("/conversations/create")
-    assert create_response.status_code == 200
-    created = create_response.json()
-    thread_id = created["thread_id"]
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        create_response = client.post("/conversations/create")
+        assert create_response.status_code == 200
+        created = create_response.json()
+        thread_id = created["thread_id"]
 
-    chat_response = client.post("/chat", json={"message": "hello", "thread_id": thread_id})
-    assert chat_response.status_code == 200
-    assert chat_response.json()["thread_id"] == thread_id
+        chat_response = client.post("/chat", json={"message": "hello", "thread_id": thread_id})
+        assert chat_response.status_code == 200
+        assert chat_response.json()["thread_id"] == thread_id
 
-    list_response = client.get("/conversations")
-    assert list_response.status_code == 200
-    summaries = list_response.json()
-    assert summaries[0]["thread_id"] == thread_id
+        list_response = client.get("/conversations")
+        assert list_response.status_code == 200
+        summaries = list_response.json()
+        assert summaries[0]["thread_id"] == thread_id
 
-    detail_response = client.get(f"/conversations/{thread_id}")
-    assert detail_response.status_code == 200
-    detail = detail_response.json()
-    assert detail["messages"][0]["content"] == "hello"
+        detail_response = client.get(f"/conversations/{thread_id}")
+        assert detail_response.status_code == 200
+        detail = detail_response.json()
+        assert detail["messages"][0]["content"] == "hello"
 
-    rename_response = client.post(
-        f"/conversations/{thread_id}/rename",
-        json={"title": "Renamed"},
-    )
-    assert rename_response.status_code == 200
-    assert rename_response.json()["title"] == "Renamed"
+        rename_response = client.post(
+            f"/conversations/{thread_id}/rename",
+            json={"title": "Renamed"},
+        )
+        assert rename_response.status_code == 200
+        assert rename_response.json()["title"] == "Renamed"

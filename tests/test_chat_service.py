@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +19,16 @@ class FakeHarnessClient:
                 max_recent_messages=8,
                 compact_threshold_chars=5000,
                 skill_memory_max=4,
+            ),
+            memory=SimpleNamespace(
+                enabled=True,
+                debounce_seconds=30,
+                storage_path=sandbox_root / "memory.json",
+                model_name=None,
+                max_facts=100,
+                fact_confidence_threshold=0.7,
+                injection_enabled=True,
+                max_injection_tokens=1200,
             ),
         )
         self.calls: list[dict[str, object]] = []
@@ -57,12 +68,15 @@ class FakeStreamingHarnessClient(FakeHarnessClient):
 async def test_chat_service_routes_context_by_thread_id(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    result = await service.run_chat("hello", thread_id="thread-a")
+    queue_calls: list[dict[str, object]] = []
+    fake_queue = SimpleNamespace(add=lambda **kwargs: queue_calls.append(kwargs))
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        result = await service.run_chat("hello", thread_id="thread-a")
 
     assert result.text == "reply:hello"
     assert result.thread_id == "thread-a"
     assert client.calls[0]["thread_id"] == "thread-a"
+    assert queue_calls[0]["thread_id"] == "thread-a"
     thread_root = tmp_path / ".sandbox" / "threads" / normalize_thread_id("thread-a")
     thread_context = thread_root / "context.json"
     assert thread_context.exists()
@@ -74,9 +88,10 @@ async def test_chat_service_routes_context_by_thread_id(tmp_path):
 async def test_chat_service_isolates_context_between_threads(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    await service.run_chat("first", thread_id="thread-a")
-    await service.run_chat("second", thread_id="thread-b")
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("first", thread_id="thread-a")
+        await service.run_chat("second", thread_id="thread-b")
 
     first_context = tmp_path / ".sandbox" / "threads" / normalize_thread_id("thread-a") / "context.json"
     second_context = tmp_path / ".sandbox" / "threads" / normalize_thread_id("thread-b") / "context.json"
@@ -89,8 +104,9 @@ async def test_chat_service_isolates_context_between_threads(tmp_path):
 async def test_chat_service_does_not_create_legacy_runtime_context_dir(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    await service.run_chat("hello", thread_id="thread-a")
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello", thread_id="thread-a")
 
     assert not (tmp_path / ".runtime").exists()
 
@@ -99,8 +115,9 @@ async def test_chat_service_does_not_create_legacy_runtime_context_dir(tmp_path)
 async def test_chat_service_stream_emits_subagent_events(tmp_path):
     client = FakeStreamingHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    events = [event async for event in service.run_chat_stream("hello", thread_id="thread-a")]
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        events = [event async for event in service.run_chat_stream("hello", thread_id="thread-a")]
 
     assert events[0]["type"] == "start"
     assert any(event["type"] == "task_started" for event in events)
@@ -115,8 +132,9 @@ async def test_chat_service_stream_emits_subagent_events(tmp_path):
 async def test_chat_service_creates_thread_id_when_missing(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    result = await service.run_chat("hello")
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        result = await service.run_chat("hello")
 
     assert result.thread_id is not None
     assert result.thread_id.startswith("thread-")
@@ -127,9 +145,10 @@ async def test_chat_service_creates_thread_id_when_missing(tmp_path):
 async def test_chat_service_appends_full_history_and_reuses_it(tmp_path):
     client = FakeHarnessClient(tmp_path / ".sandbox")
     service = ChatService(client=client)
-
-    await service.run_chat("first", thread_id="thread-a")
-    await service.run_chat("second", thread_id="thread-a")
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("first", thread_id="thread-a")
+        await service.run_chat("second", thread_id="thread-a")
 
     thread_root = tmp_path / ".sandbox" / "threads" / normalize_thread_id("thread-a")
     messages = json.loads((thread_root / "messages.json").read_text(encoding="utf-8"))
@@ -153,7 +172,9 @@ async def test_chat_service_lists_gets_and_renames_conversations(tmp_path):
     service = ChatService(client=client)
 
     created = service.create_conversation()
-    await service.run_chat("hello there", thread_id=created.thread_id)
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello there", thread_id=created.thread_id)
 
     summaries = service.list_conversations()
     assert len(summaries) == 1
@@ -169,3 +190,14 @@ async def test_chat_service_lists_gets_and_renames_conversations(tmp_path):
     refreshed = service.get_conversation(created.thread_id)
     assert refreshed is not None
     assert refreshed.summary.title == "Renamed Session"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_memory_queue_failure_does_not_break_chat(tmp_path):
+    client = FakeHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+    fake_queue = SimpleNamespace(add=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("queue failed")))
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        result = await service.run_chat("hello", thread_id="thread-a")
+
+    assert result.text == "reply:hello"

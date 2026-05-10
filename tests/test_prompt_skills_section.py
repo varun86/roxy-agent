@@ -41,3 +41,10 @@ def test_build_system_instructions_includes_skills_section_when_present():
     instructions = build_system_instructions([skill])
     assert "You are a minimal coding agent" in instructions
     assert "<available_skills>" in instructions
+
+
+def test_build_system_instructions_includes_long_term_memory_when_present():
+    instructions = build_system_instructions([], memory_text="Stable Profile:\n- Personal: Prefers concise replies")
+
+    assert "<long_term_memory>" in instructions
+    assert "Prefers concise replies" in instructions

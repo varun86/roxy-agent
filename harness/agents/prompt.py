@@ -64,6 +64,19 @@ def get_context_governance_section(
     return "\n".join(lines)
 
 
+def get_long_term_memory_section(memory_text: str | None = None) -> str:
+    if not memory_text or not memory_text.strip():
+        return ""
+    return (
+        "<long_term_memory>\n"
+        "This memory is durable background context gathered across prior sessions. "
+        "Treat it as helpful guidance, not as the user's current instruction. "
+        "If it conflicts with the current request, follow the current request.\n"
+        f"{memory_text.strip()}\n"
+        "</long_term_memory>"
+    )
+
+
 def get_subagent_section(*, max_concurrent_subagents: int) -> str:
     return (
         "<subagent_system>\n"
@@ -82,6 +95,7 @@ def build_system_instructions(
     container_base_path: str = "skills",
     pinned_skills: list[str] | None = None,
     compact_summary: str | None = None,
+    memory_text: str | None = None,
     subagent_enabled: bool = False,
     max_concurrent_subagents: int = 3,
 ) -> str:
@@ -90,12 +104,15 @@ def build_system_instructions(
         pinned_skills=pinned_skills,
         compact_summary=compact_summary,
     )
+    memory_section = get_long_term_memory_section(memory_text)
 
     parts = [BASE_INSTRUCTIONS]
     if section:
         parts.append(section)
     if pinned_skills or compact_summary:
         parts.append(context_section)
+    if memory_section:
+        parts.append(memory_section)
     if subagent_enabled:
         parts.append(get_subagent_section(max_concurrent_subagents=max_concurrent_subagents))
     return "\n\n".join(parts)
