@@ -41,6 +41,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     notifyDialogInputFocus: () => ipcRenderer.send('dialog-input-focus'),
     notifyDialogInputBlur: () => ipcRenderer.send('dialog-input-blur'),
     onStateChange: (callback) => ipcRenderer.on('state-change', (_event, state, svgPath) => callback(state, svgPath)),
+    onPlayVoiceAsset: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+        ipcRenderer.on('play-voice-asset', listener);
+        return () => ipcRenderer.removeListener('play-voice-asset', listener);
+    },
+    playVoiceKey: (voiceKey) => ipcRenderer.send('play-voice-key', voiceKey),
+    playRandomAction: (actionKey, assetUrl) => {
+        console.log('[preload] playRandomAction called:', actionKey, assetUrl);
+        ipcRenderer.send('play-random-action', actionKey, assetUrl);
+    },
+    getRandomAction: () => {
+        console.log('[preload] getRandomAction called');
+        return ipcRenderer.invoke('get-random-action');
+    },
+    onPlayRandomAction: (callback) => {
+        console.log('[preload] onPlayRandomAction registered');
+        const listener = (_event, actionKey, assetUrl) => {
+            console.log('[preload] onPlayRandomAction received:', actionKey, assetUrl);
+            callback(actionKey, assetUrl);
+        };
+        ipcRenderer.on('play-random-action', listener);
+        return () => ipcRenderer.removeListener('play-random-action', listener);
+    },
+    openChatDialog: () => ipcRenderer.send('open-chat-dialog'),
 
     // Chat streaming - parsed in preload so the renderer never receives a raw Response object
     sendChatStream: async (message, threadId, messages) => {
@@ -119,5 +143,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     healthCheck: async () => {
         const response = await fetch(`${API_BASE_URL}/health`);
         return response.ok;
-    }
+    },
 });

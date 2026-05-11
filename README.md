@@ -3,7 +3,7 @@
 <div align="center">
   <img src="desktop/assets/roxy/roxy-idle.svg" alt="Roxy - Your Desktop Companion" width="128" height="128" />
   <p>
-    <strong>roxy-agent</strong> — 服务于洛神教的专属桌面 Agent，基于 deer-flow构建的模块化 AI Agent 运行时引擎。
+    <strong>roxy-agent</strong> — 一个把桌面桌宠、Agent Harness、3D VRM 动作资产与本地 TTS 融合在一起的桌面 AI Companion。
   </p>
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python">
@@ -16,23 +16,77 @@
 
 ## 项目简介
 
-roxy-agent 是专为洛神教打造的桌面 AI Agent。它将像素风格的 Roxy ”桌宠“与强大的 Agent 能力结合，为你带来一个可交互、有灵魂的桌面助手。
+`roxy-agent` 是一个偏作品型、也偏产品型的桌面 AI Agent 项目。
+
+它不只是“接个模型聊聊天”，而是把这些层真正拼到一起：
+
+- **桌面存在感**：Roxy 常驻桌宠 + 对话弹层 + 状态反馈
+- **Agent Runtime**：tool loop、sandbox、memory、RAG、subagent、host browser action
+- **3D Character Stack**：VRM 模型、VRMA 动作、情绪与状态切换
+- **Voice Stack**：本地 GPT-SoVITS TTS 服务 + 桌宠语音播放反馈
+- **Persona Layer**：围绕洛琪希构建的角色技能、语气与陪伴式交互
+
+目标很直接：让桌面助手不只是能回答问题，而是真的像一个会想、会动、会出声的角色存在。
 
 ## 对话展示
 
 双击打开对话的轻交互模式
 
-| 对话列表                       | 对话详情                                     |
-|----------------------------|------------------------------------------|
-| ![chat.png](docs/chat.png) | ![chat-result.png](docs/chat-result.png) |
+| 常态模式                       | 思考状态                               |
+|----------------------------|------------------------------------|
+| ![idle.png](docs/idle.png) | ![thinking.png](docs/thinking.png) |
+
+## Why It Feels Different
+
+| 能力层 | 现在已经有的内容 |
+|------|------|
+| **Agent Runtime** | 多轮 tool-call、thread context、knowledge search、subagent、宿主浏览器动作 |
+| **Desktop Presence** | Electron 常驻桌宠、轻量对话弹层、事件驱动反馈 |
+| **3D Character Assets** | `desktop/assets/roxy_3D/roxi.vrm` 主模型 + 多组 `VRMA` 动作资源 |
+| **Voice Layer** | `scripts/tts/roxy_gsv_service.py` 本地 TTS 服务 + `desktop/assets/voice/ja/*.wav` 语音素材 |
+| **Roleplay / Persona** | `roxy-skill` 驱动的洛琪希角色表达与陪伴感 |
 
 ### 核心特性
 
 - **桌面桌宠**：像素风格的 Roxy 桌宠，内置于 Electron 应用，实时响应 Agent 状态
-- **Agent 能力**：基于简易的deer-flow的完整Harness系统
+- **3D 角色演出**：内置 VRM 模型与 VRMA 动作资源，桌宠不再只是平面贴图，而是可扩展的 3D 角色层
+- **本地语音能力**：接入 GPT-SoVITS 本地 TTS 服务，为桌面陪伴体验预留真正“开口说话”的能力
+- **Agent 能力**：基于 deer-flow 思路演进出的完整 Harness 系统，包含 loop、tool registry、sandbox、memory、RAG 与 subagent
 - **RoxySkills**：内置蒸馏好的洛琪希角色技能系统，深度定制的角色 prompt 和行为模式
 - **可扩展性**：完整的工具注册与执行框架，轻松添加自定义工具
 - **沙箱安全**：基于路径边界和命令过滤的本地安全执行环境
+
+## Media Stack
+
+### Pixel Pet Layer
+
+- 资源目录：`desktop/assets/roxy/`
+- 当前内置 idle、thinking、working、sleeping、drag reaction 等像素状态资源
+- 适合常驻桌面、轻量反馈、通知提醒与低功耗展示
+
+### 3D Pet Layer
+
+- 主模型：`desktop/assets/roxy_3D/roxi.vrm`
+- 备用模型：`desktop/assets/roxy_3D/roxy_asset_3d.vrm`
+- 动作目录：`desktop/assets/roxy_3D/vrma/`
+- 当前已接入 `Thinking`、`LookAround`、`Relax`、`Angry`、`Blush`、`Clapping`、`Sleepy`、`Sad`、`Jump`、`Surprised`、`Goodbye`
+- 渲染入口：`desktop/src/renderer/pet/PetApp.tsx`
+
+### Voice / TTS Layer
+
+- 本地 TTS 服务：`scripts/tts/roxy_gsv_service.py`
+- 启动脚本：`scripts/tts/run_roxy_gsv_service.sh`
+- 使用说明：`docs/roxy-gsv-local-tts.md`
+- 桌宠语音素材：`desktop/assets/voice/ja/`
+- Electron 主进程已经具备语音事件转发与播放能力
+
+这意味着这个项目现在已经不只是一个聊天壳子，而是正在把这五层能力汇成同一个角色：
+
+- 文本大脑
+- 工具手脚
+- 桌面形象
+- 动作表达
+- 声音反馈
 
 ### 灵感来源
 
@@ -70,6 +124,12 @@ cd frontend && npm install && npm run dev
 
 # 5. 新开终端，启动桌面客户端
 cd desktop && npm install && npm run dev
+```
+
+如果你想把本地语音链路也一起跑起来，可以额外启动：
+
+```bash
+scripts/tts/run_roxy_gsv_service.sh
 ```
 
 ### 一键启动所有服务
@@ -112,6 +172,8 @@ MINIMAX_API_KEY=your_api_key_here
 HARNESS_DEFAULT_MODEL=minimax-m2.7
 HARNESS_SANDBOX_ROOT=.sandbox
 HARNESS_MAX_STEPS=8
+HARNESS_LOCAL_BROWSER_ENABLED=true
+HARNESS_LOCAL_BROWSER_SEARCH_ENGINE=https://www.bing.com/search?q={query}
 ```
 
 ## 项目架构
@@ -159,7 +221,7 @@ result = await loop.run(messages, max_steps=8)
 
 ### ToolRegistry (`harness/tools/registry.py`)
 
-可扩展的工具注册表，默认注册 6 个工具：
+可扩展的工具注册表，默认注册 9 个工具：
 
 | 工具 | 功能 |
 |------|------|
@@ -168,6 +230,9 @@ result = await loop.run(messages, max_steps=8)
 | `read_file` | 读取文件 |
 | `write_file` | 写入文件 |
 | `str_replace` | 原地编辑文件 |
+| `browser_search` | 打开本地默认浏览器并发起搜索 |
+| `browser_open` | 在本地默认浏览器中打开指定网页 |
+| `knowledge_search` | 搜索本地知识库与上传资料 |
 | `web_search` | 网页搜索 |
 
 ### BasicSandbox (`harness/sandbox/runtime.py`)
@@ -192,9 +257,20 @@ skills/
 
 想换掉 Roxy？完全可以！roxy-agent设计为可泛化的IP定制框架：
 
-1. **替换像素资源**：将 `desktop/assets/roxy/` 下的 SVG 替换为你喜欢的角色
-2. **创建新技能**：在 `skills/custom/` 下创建新的技能目录和 `SKILL.md`
-3. **修改 Agent Prompt**：编辑技能文件中的 system prompt 来定义角色行为
+1. **替换像素资源**：将 `desktop/assets/roxy/` 下的 SVG 替换为你喜欢的角色（已弃用，目前全面转向3D资产）
+2. **替换 3D 资产**：将 `desktop/assets/roxy_3D/` 下的 `VRM / VRMA` 模型与动作替换成新的角色包
+3. **替换语音能力**：调整 `scripts/tts/` 下的本地 TTS 服务权重、参考音频与输出风格
+4. **创建新技能**：在 `skills/custom/` 下创建新的技能目录和 `SKILL.md`
+5. **修改 Agent Prompt**：编辑技能文件中的 system prompt 来定义角色行为
+
+如果你想做自己的桌面角色项目，这个仓库已经给出了一个很完整的骨架：
+
+- 桌宠容器
+- Agent runtime
+- 角色技能系统
+- 3D 资产接入方式
+- 本地语音服务入口
+- 工具与沙箱机制
 
 ## License
 

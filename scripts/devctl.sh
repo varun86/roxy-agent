@@ -38,6 +38,11 @@ pid_is_running() {
   kill -0 "${pid}" >/dev/null 2>&1
 }
 
+port_listener_pid() {
+  local port="$1"
+  lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+}
+
 process_group_is_running() {
   local pid="$1"
   kill -0 -- "-${pid}" >/dev/null 2>&1
@@ -155,9 +160,9 @@ stop_qdrant() {
 
 backend_command() {
   if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
-    printf '%q ' "${ROOT_DIR}/.venv/bin/python" -m uvicorn APP.api.app:create_app --factory --reload --host 0.0.0.0 --port 8000
+    printf '%q ' "${ROOT_DIR}/.venv/bin/python" -m uvicorn APP.api.app:create_app --factory --reload --reload-dir "${ROOT_DIR}/APP" --reload-dir "${ROOT_DIR}/harness" --reload-dir "${ROOT_DIR}/scripts" --host 0.0.0.0 --port 8000
   elif command -v uv >/dev/null 2>&1; then
-    printf '%q ' uv run python -m uvicorn APP.api.app:create_app --factory --reload --host 0.0.0.0 --port 8000
+    printf '%q ' uv run python -m uvicorn APP.api.app:create_app --factory --reload --reload-dir "${ROOT_DIR}/APP" --reload-dir "${ROOT_DIR}/harness" --reload-dir "${ROOT_DIR}/scripts" --host 0.0.0.0 --port 8000
   else
     warn "Neither .venv/bin/python nor uv is available for backend startup"
     exit 1

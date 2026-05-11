@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 
 from harness.client import HarnessClient
 from harness.context import ConversationStore, ThreadContextStore, ThreadRuntimeResolver, generate_thread_id
+from harness.memory import get_memory_queue
 from harness.models.types import AgentRunResult
 
 
@@ -59,6 +60,21 @@ class ChatService:
 
         context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
         return self._context_store.build_history(context, messages)
+
+    def _queue_memory_update(
+        self,
+        *,
+        thread_id: str,
+        user_message: str,
+        assistant_message: str,
+        history: list[dict[str, str]],
+    ) -> None:
+        payload = [*history, {"role": "user", "content": user_message}, {"role": "assistant", "content": assistant_message}]
+        try:
+            queue = get_memory_queue(self._client.config)
+            queue.add(thread_id=thread_id, messages=payload)
+        except Exception:
+            return
 
     def create_conversation(self, thread_id: str | None = None) -> Any:
         resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
@@ -141,6 +157,12 @@ class ChatService:
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
             )
+            self._queue_memory_update(
+                thread_id=resolved_thread_id,
+                user_message=message,
+                assistant_message=result.text,
+                history=history,
+            )
             result.thread_id = resolved_thread_id
             return result
 
@@ -212,6 +234,12 @@ class ChatService:
                 assistant_message=result.text,
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
+            )
+            self._queue_memory_update(
+                thread_id=resolved_thread_id,
+                user_message=message,
+                assistant_message=result.text,
+                history=history,
             )
             result.thread_id = resolved_thread_id
 

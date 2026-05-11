@@ -24,6 +24,8 @@ _DANGEROUS_COMMAND_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"(^|[;&|()])\s*(mkfs|fdisk|diskutil\s+eraseDisk|diskutil\s+partitionDisk)\b", "disk formatting commands are not allowed"),
     (r"(^|[;&|()])\s*dd\b", "raw disk copy commands are not allowed"),
     (r"(^|[;&|()])\s*mv\s+.+\s+/dev/null\b", "destructive move commands are not allowed"),
+    (r">\s*/", "redirect to absolute path is not allowed"),
+    (r">>\s*/", "append to absolute path is not allowed"),
 )
 
 

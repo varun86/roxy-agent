@@ -11,6 +11,8 @@ type TraceSummary = {
   steps: number;
   tool_calls: number;
   errors: number;
+  subagent_calls?: number;
+  subagent_errors?: number;
 };
 
 type ToolCallEvent = {
@@ -552,6 +554,39 @@ export default function DialogApp() {
     }
   };
 
+  const voiceRotationRef = useRef<Record<string, number>>({});
+
+  const selectRotatingVoiceKey = (voiceKeys: string[]) => {
+    if (voiceKeys.length === 1) {
+      return voiceKeys[0];
+    }
+    const groupKey = voiceKeys.join("|");
+    const currentIndex = voiceRotationRef.current[groupKey] ?? 0;
+    const selected = voiceKeys[currentIndex % voiceKeys.length];
+    voiceRotationRef.current[groupKey] = (currentIndex + 1) % voiceKeys.length;
+    return selected;
+  };
+
+  const playVoiceForDone = (nextTrace: TraceSummary | null) => {
+    if (nextTrace?.errors && nextTrace.errors > 0) {
+      window.electronAPI.playVoiceKey("partial_issue_a");
+      return;
+    }
+    if ((nextTrace?.subagent_calls ?? 0) > 0 || (nextTrace?.tool_calls ?? 0) >= 4) {
+      window.electronAPI.playVoiceKey(selectRotatingVoiceKey(["success_heavy_a", "success_heavy_b"]));
+      return;
+    }
+    if ((nextTrace?.tool_calls ?? 0) >= 1) {
+      window.electronAPI.playVoiceKey(selectRotatingVoiceKey(["success_normal_a", "success_normal_b"]));
+      return;
+    }
+    window.electronAPI.playVoiceKey(selectRotatingVoiceKey(["success_light_a", "success_light_b"]));
+  };
+
+  const playVoiceForError = () => {
+    window.electronAPI.playVoiceKey("hard_failure_a");
+  };
+
   const sendMessage = async (message: string) => {
     if (!message || isStreaming || !isOnline) return;
 
@@ -625,6 +660,7 @@ export default function DialogApp() {
           if (resolvedThreadId) {
             await refreshConversationSummary(resolvedThreadId, finalText);
           }
+          playVoiceForDone(event.trace ?? null);
           continue;
         }
 
@@ -658,6 +694,7 @@ export default function DialogApp() {
           isError: !assistantTextContentRef.current,
         });
       }
+      playVoiceForError();
     } finally {
       window.electronAPI.setDialogChatBusy(false);
       setShowTyping(false);

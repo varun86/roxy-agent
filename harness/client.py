@@ -12,6 +12,7 @@ from harness.agents.prompt import build_system_instructions
 from harness.config.settings import HarnessConfig, load_harness_config
 from harness.context import ThreadRuntimePaths
 from harness.models.types import AgentRunResult, RuntimeContext
+from harness.memory import format_memory_for_injection, get_memory_data
 from harness.rag import KnowledgeBaseService
 from harness.sandbox.runtime import BasicSandbox
 from harness.skills import Skill, load_skills
@@ -24,6 +25,7 @@ from harness.subagents import (
     get_subagent_config,
 )
 from harness.tools.executor import ToolExecutor
+from harness.tools.local_browser import LocalBrowserClient
 from harness.tools.registry import ToolRegistry, ToolRuntime
 
 
@@ -171,6 +173,16 @@ class HarnessClient:
             allowed_roots=[thread_paths.shared_skills_dir],
             command_timeout_seconds=self.config.sandbox.command_timeout_seconds,
             max_output_chars=self.config.runtime.max_output_chars,
+        )
+
+    def _build_memory_text(self, current_user_message: str) -> str:
+        if not self.config.memory.enabled or not self.config.memory.injection_enabled:
+            return ""
+        memory_data = get_memory_data(self.config)
+        return format_memory_for_injection(
+            memory_data,
+            current_user_message,
+            max_tokens=self.config.memory.max_injection_tokens,
         )
 
     async def _run_subagent(
@@ -323,6 +335,7 @@ class HarnessClient:
         subagent_enabled: bool | None = None,
         event_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         thread_id: str | None = None,
+        current_user_message: str = "",
     ) -> AsyncAgentLoop:
         selected_model = self.config.get_model(model_name)
         sandbox = self._make_sandbox(thread_paths)
@@ -331,6 +344,12 @@ class HarnessClient:
         include_task_tool = effective_subagent_enabled and subagent_depth == 0
         registry = ToolRegistry.with_default_tools(
             sandbox,
+            local_browser_client=LocalBrowserClient(
+                enabled=self.config.local_browser.enabled,
+                search_engine_template=self.config.local_browser.search_engine,
+                allowed_domains=self.config.local_browser.allowed_domains,
+            ),
+            local_browser_enabled=self.config.local_browser.enabled,
             knowledge_base=knowledge_base,
             include_task_tool=include_task_tool,
         )
@@ -377,6 +396,7 @@ class HarnessClient:
             container_base_path="skills",
             pinned_skills=pinned_skills,
             compact_summary=compact_summary,
+            memory_text=self._build_memory_text(current_user_message),
             subagent_enabled=include_task_tool,
             max_concurrent_subagents=self.config.runtime.max_concurrent_subagents,
         )
@@ -429,6 +449,7 @@ class HarnessClient:
             compact_summary=compact_summary,
             event_callback=event_callback,
             thread_id=thread_id,
+            current_user_message=prompt,
         )
         if on_text_delta is None:
             return await agent.run(prompt, history_messages=conversation_history)

@@ -4,16 +4,52 @@ const http = require('http');
 
 const SERVER_PORT = 23333;
 const EVENT_TO_STATE = {
-    SessionStart: 'idle',
+    SessionStart: 'lookAround',
     SessionEnd: 'sleeping',
     UserPromptSubmit: 'thinking',
-    PreToolUse: 'working',
-    PostToolUse: 'working',
-    PostToolUseFailure: 'working',
-    Stop: 'idle',
-    SubagentStart: 'working',
-    SubagentStop: 'working',
+    PreToolUse: 'thinking',
+    PostToolUse: 'task-success',
+    PostToolUseFailure: 'task-failure',
+    Stop: 'task-success',
+    SubagentStart: 'thinking',
+    SubagentStop: 'task-success',
 };
+
+function inferStopOutcome(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return 'task-success';
+    }
+
+    const textCandidates = [
+        payload.stop_reason,
+        payload.reason,
+        payload.outcome,
+        payload.result,
+        payload.status,
+        payload.error,
+        payload.message,
+    ]
+        .filter((value) => typeof value === 'string' && value.trim())
+        .join(' ')
+        .toLowerCase();
+
+    if (!textCandidates) {
+        return 'task-success';
+    }
+
+    if (
+        textCandidates.includes('error') ||
+        textCandidates.includes('fail') ||
+        textCandidates.includes('abort') ||
+        textCandidates.includes('cancel') ||
+        textCandidates.includes('reached') ||
+        textCandidates.includes('max_steps')
+    ) {
+        return 'task-failure';
+    }
+
+    return 'task-success';
+}
 
 function readStdinJson() {
     return new Promise((resolve) => {
@@ -69,10 +105,10 @@ function postState(payload) {
 
 async function main() {
     const event = process.argv[2];
-    const state = EVENT_TO_STATE[event];
-    if (!state) return;
-
     const payload = await readStdinJson();
+    const mappedState = EVENT_TO_STATE[event];
+    if (!mappedState) return;
+    const state = event === 'Stop' ? inferStopOutcome(payload) : mappedState;
     await postState({
         state,
         event,

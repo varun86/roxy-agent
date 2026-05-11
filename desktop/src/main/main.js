@@ -3,6 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const log = require('electron-log');
 const { applyStationaryCollectionBehavior } = require('./mac-window');
 
@@ -11,17 +12,50 @@ log.transports.console.level = 'debug';
 
 const isMac = process.platform === 'darwin';
 const SERVER_PORT = 23333;
-const PET_SIZE = 150;
+const PET_SIZE = 340;
 const HIT_PADDING = 10;
 const SESSION_TTL_MS = 10 * 60 * 1000;
-const CODEX_TURN_COMPLETE_GRACE_MS = 4000;
+const TASK_SEQUENCE_MS = 3200;
+const DRAG_SLEEP_MS = 5 * 60 * 1000;
 
 const STATE_TO_SVG = {
-    idle: 'roxy-idle.svg',
-    working: 'roxy-working.svg',
-    'working-typing': 'roxy-working-typing.svg',
-    'react-drag': 'roxy-react-drag.svg',
+    thinking: 'roxy-thinking.svg',
+    lookAround: 'roxy-idle.svg',
 };
+
+const VRMA_ACTION_URLS = [
+    'Relax',
+    'Angry',
+    'Blush',
+    'Clapping',
+    'Sleepy',
+    'Sad',
+    'Jump',
+    'Surprised',
+    'Goodbye',
+].map(name => {
+    const relativePath = path.join('..', '..', 'assets', 'roxy_3D', 'vrma', `${name}.vrma`);
+    return {
+        key: name.toLowerCase(),
+        relativePath,
+        absolutePath: path.join(__dirname, relativePath),
+        label: name,
+    };
+});
+
+let lastRandomActionKey = null;
+
+function getRandomVrmaAction() {
+    const available = VRMA_ACTION_URLS.filter(a => a.key !== lastRandomActionKey);
+    if (available.length === 0) return VRMA_ACTION_URLS[0];
+    const selected = available[Math.floor(Math.random() * available.length)];
+    lastRandomActionKey = selected.key;
+    return {
+        key: selected.key,
+        label: selected.label,
+        url: pathToFileURL(selected.absolutePath).href,
+    };
+}
 
 const CLAUDE_HOOK_EVENTS = [
     'SessionStart',
@@ -74,24 +108,40 @@ const DIALOG_CONFIG = {
 
 const CODEX_AGENT_CONFIG = {
     logEventMap: {
-        'session_meta': 'idle',
+        'session_meta': 'lookAround',
         'event_msg:task_started': 'thinking',
         'event_msg:user_message': 'thinking',
         'event_msg:agent_message': null,
-        'event_msg:exec_command_end': 'working',
-        'event_msg:patch_apply_end': 'working',
-        'event_msg:custom_tool_call_output': 'working',
-        'response_item:function_call': 'working',
-        'response_item:custom_tool_call': 'working',
-        'response_item:web_search_call': 'working',
-        'event_msg:task_complete': 'codex-turn-end',
-        'event_msg:context_compacted': 'idle',
-        'event_msg:turn_aborted': 'idle',
+        'event_msg:exec_command_end': 'thinking',
+        'event_msg:patch_apply_end': 'thinking',
+        'event_msg:custom_tool_call_output': 'thinking',
+        'response_item:function_call': 'thinking',
+        'response_item:custom_tool_call': 'thinking',
+        'response_item:web_search_call': 'thinking',
+        'event_msg:task_complete': 'task-success',
+        'event_msg:context_compacted': 'lookAround',
+        'event_msg:turn_aborted': 'task-failure',
     },
     logConfig: {
         sessionDir: '~/.codex/sessions',
         pollIntervalMs: 1500,
     },
+};
+
+const VOICE_CLIP_FILES = {
+    success_light_a: 'success_light_a.wav',
+    success_light_b: 'success_light_b.wav',
+    success_normal_a: 'success_normal_a.wav',
+    success_normal_b: 'success_normal_b.wav',
+    success_heavy_a: 'success_heavy_a.wav',
+    success_heavy_b: 'success_heavy_b.wav',
+    partial_issue_a: 'partial_issue_a.wav',
+    hard_failure_a: 'hard_failure_a.wav',
+};
+
+const EXTERNAL_COMPLETION_EVENTS = {
+    success: new Set(['Stop', 'event_msg:task_complete']),
+    failure: new Set(['Stop', 'turn_aborted', 'event_msg:turn_aborted']),
 };
 
 let petWindow = null;
@@ -104,12 +154,26 @@ let dragLocked = false;
 let dragSnapshot = null;
 let dragReactionActive = false;
 let chatModeActive = false;
-let currentPetState = 'idle';
+let currentPetState = 'lookAround';
+let sleepModeActive = false;
+let lastDragAt = Date.now();
+let transientStateTimer = null;
+let sleepCheckTimer = null;
 let dialogChatBusy = false;
 const externalSessions = new Map();
+const voiceRotationState = new Map();
+const externalCompletionCooldown = new Map();
 
 function getSvgAssetPath(fileName) {
     return path.join(__dirname, '..', '..', 'assets', 'roxy', fileName);
+}
+
+function getVoiceAssetPath(voiceKey) {
+    const fileName = VOICE_CLIP_FILES[voiceKey];
+    if (!fileName) {
+        return null;
+    }
+    return path.join(__dirname, '..', '..', 'assets', 'voice', 'ja', fileName);
 }
 
 function resolveRendererEntry(distFileName) {
@@ -122,13 +186,76 @@ function resolveRendererEntry(distFileName) {
 }
 
 function getCurrentSvgPath() {
-    return getSvgAssetPath(STATE_TO_SVG[currentPetState] || STATE_TO_SVG.idle);
+    return getSvgAssetPath(STATE_TO_SVG[currentPetState] || STATE_TO_SVG.lookAround);
 }
 
 function sendToRenderer(channel, ...args) {
     if (petWindow && !petWindow.isDestroyed()) {
         petWindow.webContents.send(channel, ...args);
     }
+}
+
+function selectRotatingVoiceKey(voiceKeys) {
+    if (!Array.isArray(voiceKeys) || voiceKeys.length === 0) {
+        return null;
+    }
+    if (voiceKeys.length === 1) {
+        return voiceKeys[0];
+    }
+    const groupKey = voiceKeys.join('|');
+    const currentIndex = voiceRotationState.get(groupKey) || 0;
+    const selected = voiceKeys[currentIndex % voiceKeys.length];
+    voiceRotationState.set(groupKey, (currentIndex + 1) % voiceKeys.length);
+    return selected;
+}
+
+function emitVoiceKey(voiceKey) {
+    if (!petWindow || petWindow.isDestroyed() || typeof voiceKey !== 'string' || !voiceKey.trim()) {
+        return false;
+    }
+    const normalizedVoiceKey = voiceKey.trim();
+    const voicePath = getVoiceAssetPath(normalizedVoiceKey);
+    if (!voicePath || !fs.existsSync(voicePath)) {
+        log.warn(`Voice asset not found for key: ${normalizedVoiceKey}`);
+        return false;
+    }
+
+    const payload = {
+        voiceKey: normalizedVoiceKey,
+        assetUrl: pathToFileURL(voicePath).href,
+    };
+    log.info(`Forwarding voice asset to pet window: ${normalizedVoiceKey}`);
+    petWindow.webContents.send('play-voice-asset', payload);
+    return true;
+}
+
+function playVoiceForTaskCompletion(status) {
+    if (status === 'failure') {
+        emitVoiceKey('hard_failure_a');
+        return;
+    }
+    const voiceKey = selectRotatingVoiceKey(['success_light_a', 'success_light_b']);
+    if (voiceKey) {
+        emitVoiceKey(voiceKey);
+    }
+}
+
+function maybeAnnounceExternalCompletion({ sessionId, event, outcome }) {
+    if (!sessionId || !outcome) return;
+    const normalizedOutcome = outcome === 'failure' ? 'failure' : 'success';
+    const allowedEvents = EXTERNAL_COMPLETION_EVENTS[normalizedOutcome];
+    if (allowedEvents && event && !allowedEvents.has(event)) {
+        return;
+    }
+
+    const cooldownKey = `${sessionId}:${normalizedOutcome}`;
+    const now = Date.now();
+    const lastAt = externalCompletionCooldown.get(cooldownKey) || 0;
+    if (now - lastAt < 1500) {
+        return;
+    }
+    externalCompletionCooldown.set(cooldownKey, now);
+    playVoiceForTaskCompletion(normalizedOutcome);
 }
 
 function reapplyMacVisibility(targetWindow, options = {}) {
@@ -241,23 +368,65 @@ function syncDialogWindowPosition() {
 }
 
 function resolveVisualState() {
-    if (dragReactionActive) {
-        return 'react-drag';
-    }
-
     if (dialogChatBusy) {
-        return 'working-typing';
+        return 'thinking';
     }
+    for (const session of externalSessions.values()) {
+        if (session.state === 'thinking') {
+            return 'thinking';
+        }
+    }
+    return 'lookAround';
+}
+
+function clearTransientStateTimer() {
+    if (transientStateTimer) {
+        clearTimeout(transientStateTimer);
+        transientStateTimer = null;
+    }
+}
+
+function clearSleepMode() {
+    sleepModeActive = false;
+}
+
+function touchDragActivity() {
+    lastDragAt = Date.now();
+    if (sleepModeActive) {
+        clearSleepMode();
+        currentPetState = 'lookAround';
+    }
+}
+
+function setTransientState(nextState, delayMs = TASK_SEQUENCE_MS) {
+    clearTransientStateTimer();
+    clearSleepMode();
+    currentPetState = nextState;
+    broadcastPetState(true);
+    transientStateTimer = setTimeout(() => {
+        transientStateTimer = null;
+        currentPetState = 'lookAround';
+        broadcastPetState(true);
+    }, delayMs);
+}
+
+function maybeEnterSleepMode() {
+    if (dragReactionActive || dragLocked || dialogChatBusy) return;
 
     let hasBusy = false;
     for (const session of externalSessions.values()) {
-        if (session.state === 'working' || session.state === 'working-typing') {
+        if (session.state === 'thinking') {
             hasBusy = true;
+            break;
         }
     }
+    if (hasBusy) return;
 
-    if (hasBusy) return 'working-typing';
-    return 'idle';
+    if (Date.now() - lastDragAt >= DRAG_SLEEP_MS) {
+        sleepModeActive = true;
+        currentPetState = 'sleeping';
+        broadcastPetState(true);
+    }
 }
 
 function broadcastPetState(force = false) {
@@ -269,7 +438,10 @@ function broadcastPetState(force = false) {
 
 function normalizeExternalState(rawState) {
     if (rawState === 'working' || rawState === 'thinking' || rawState === 'working-typing') {
-        return 'working-typing';
+        return 'thinking';
+    }
+    if (rawState === 'lookAround') {
+        return 'lookAround';
     }
     return null;
 }
@@ -278,20 +450,6 @@ function clearExternalSessionTimer(session) {
     if (!session || !session.clearTimer) return;
     clearTimeout(session.clearTimer);
     session.clearTimer = null;
-}
-
-function scheduleExternalSessionClear(sessionId, delayMs = CODEX_TURN_COMPLETE_GRACE_MS) {
-    if (!sessionId) return;
-    const session = externalSessions.get(sessionId);
-    if (!session) return;
-    clearExternalSessionTimer(session);
-    session.clearTimer = setTimeout(() => {
-        const latest = externalSessions.get(sessionId);
-        if (!latest) return;
-        clearExternalSessionTimer(latest);
-        externalSessions.delete(sessionId);
-        broadcastPetState();
-    }, delayMs);
 }
 
 function upsertExternalSession(sessionId, state, meta = {}) {
@@ -342,26 +500,80 @@ function handleIncomingStateEvent(body) {
     const event = typeof body.event === 'string' ? body.event : '';
     const agentId = typeof body.agent_id === 'string' ? body.agent_id : 'external';
 
-    if (event === 'SessionEnd' || event === 'Stop') {
+    if (body.state === 'SessionEnd' || body.state === 'Stop') {
+        upsertExternalSession(sessionId, null, { event, agentId });
+        return;
+    }
+
+    if (body.state === 'thinking') {
+        upsertExternalSession(sessionId, 'thinking', { event, agentId });
+        return;
+    }
+
+    if (body.state === 'task-success') {
+        maybeAnnounceExternalCompletion({ sessionId, event, outcome: 'success' });
+        upsertExternalSession(sessionId, null, { event, agentId });
+        return;
+    }
+
+    if (body.state === 'task-failure') {
+        maybeAnnounceExternalCompletion({ sessionId, event, outcome: 'failure' });
+        upsertExternalSession(sessionId, null, { event, agentId });
+        return;
+    }
+
+    if (body.state === 'lookAround') {
         upsertExternalSession(sessionId, null, { event, agentId });
         return;
     }
 
     const mappedState = normalizeExternalState(body.state);
-    if (!mappedState) {
-        if (body.state === 'idle' || body.state === 'sleeping' || body.state === 'attention') {
-            upsertExternalSession(sessionId, null, { event, agentId });
-        }
-        return;
+    if (mappedState === 'thinking') {
+        upsertExternalSession(sessionId, mappedState, { event, agentId });
     }
-
-    upsertExternalSession(sessionId, mappedState, { event, agentId });
 }
 
 function startStateServer() {
     if (stateServer) return;
 
     stateServer = http.createServer((req, res) => {
+        if (req.method === 'POST' && req.url === '/play-tts') {
+            const chunks = [];
+            req.on('data', (chunk) => chunks.push(chunk));
+            req.on('end', () => {
+                try {
+                    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    if (!payload || typeof payload !== 'object') {
+                        throw new Error('Invalid TTS payload');
+                    }
+                    if (petWindow && !petWindow.isDestroyed()) {
+                        log.info('Received /play-tts request, forwarding to pet window');
+                        if (typeof payload.voiceKey === 'string' && payload.voiceKey.trim()) {
+                            const voicePath = getVoiceAssetPath(payload.voiceKey.trim());
+                            if (!voicePath || !fs.existsSync(voicePath)) {
+                                throw new Error(`Unknown voice key: ${payload.voiceKey}`);
+                            }
+                            petWindow.webContents.send('play-voice-asset', {
+                                voiceKey: payload.voiceKey.trim(),
+                                assetUrl: pathToFileURL(voicePath).href,
+                            });
+                        } else if (typeof payload.assetUrl === 'string' && payload.assetUrl.trim()) {
+                            petWindow.webContents.send('play-voice-asset', payload);
+                        } else {
+                            throw new Error('Invalid voice payload');
+                        }
+                    }
+                    res.writeHead(204);
+                    res.end();
+                } catch (error) {
+                    log.warn('Failed to process /play-tts payload:', error.message);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: false }));
+                }
+            });
+            return;
+        }
+
         if (req.method === 'POST' && req.url === '/state') {
             const chunks = [];
             req.on('data', (chunk) => chunks.push(chunk));
@@ -477,18 +689,22 @@ function startCodexMonitor() {
     try {
         const CodexLogMonitor = require('./codex-log-monitor');
         codexMonitor = new CodexLogMonitor(CODEX_AGENT_CONFIG, (sessionId, state, event) => {
-            const mappedState = normalizeExternalState(state);
-            if (mappedState) {
-                upsertExternalSession(sessionId, mappedState, { event, agentId: 'codex' });
+            if (state === 'task-success') {
+                maybeAnnounceExternalCompletion({ sessionId, event, outcome: 'success' });
+                upsertExternalSession(sessionId, null, { event, agentId: 'codex' });
                 return;
             }
-            if (state === 'idle' || state === 'attention') {
-                if (event === 'event_msg:task_complete') {
-                    scheduleExternalSessionClear(sessionId, CODEX_TURN_COMPLETE_GRACE_MS);
-                    return;
-                }
+            if (state === 'task-failure') {
+                maybeAnnounceExternalCompletion({ sessionId, event, outcome: 'failure' });
                 upsertExternalSession(sessionId, null, { event, agentId: 'codex' });
+                return;
             }
+            const mappedState = normalizeExternalState(state);
+            if (mappedState === 'thinking') {
+                upsertExternalSession(sessionId, 'thinking', { event, agentId: 'codex' });
+                return;
+            }
+            upsertExternalSession(sessionId, null, { event, agentId: 'codex' });
         });
         codexMonitor.start();
         log.info('Codex log monitor started');
@@ -550,6 +766,7 @@ function createHitWindow() {
         resizable: false,
         hasShadow: false,
         focusable: !isMac,
+        backgroundColor: '#00000000',
         webPreferences: {
             preload: path.join(__dirname, '..', 'preload', 'preload.js'),
             contextIsolation: true,
@@ -604,6 +821,7 @@ function createDialogWindow() {
 
 ipcMain.on('drag-lock', (_event, locked) => {
     dragLocked = !!locked;
+    touchDragActivity();
     if (!dragLocked || !petWindow || petWindow.isDestroyed()) {
         dragSnapshot = null;
         syncLinkedWindows();
@@ -620,6 +838,7 @@ ipcMain.on('drag-lock', (_event, locked) => {
 
 ipcMain.on('drag-move', () => {
     if (!dragLocked || !dragSnapshot || !petWindow || petWindow.isDestroyed()) return;
+    touchDragActivity();
 
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
@@ -638,17 +857,20 @@ ipcMain.on('drag-move', () => {
 ipcMain.on('drag-end', () => {
     dragLocked = false;
     dragSnapshot = null;
+    touchDragActivity();
     syncLinkedWindows();
     syncDialogWindowPosition();
 });
 
 ipcMain.on('start-drag-reaction', () => {
     dragReactionActive = true;
+    touchDragActivity();
     broadcastPetState();
 });
 
 ipcMain.on('end-drag-reaction', () => {
     dragReactionActive = false;
+    touchDragActivity();
     broadcastPetState();
 });
 
@@ -685,6 +907,31 @@ ipcMain.on('dialog-chat-busy', (_event, active) => {
     broadcastPetState();
 });
 
+ipcMain.on('play-voice-key', (_event, voiceKey) => {
+    emitVoiceKey(voiceKey);
+});
+
+ipcMain.on('play-random-action', (_event, actionKey, assetUrl) => {
+    log.info(`[DEBUG] play-random-action received in main: key=${actionKey}`);
+    if (!petWindow || petWindow.isDestroyed()) {
+        log.info('[DEBUG] petWindow is null/destroyed');
+        return;
+    }
+    log.info(`[DEBUG] petWindow exists, sending to webContents. webContents.isLoading()=`);
+    try {
+        petWindow.webContents.send('play-random-action', actionKey, assetUrl);
+        log.info('[DEBUG] send() called successfully');
+    } catch (e) {
+        log.error('[DEBUG] send() failed:', e.message);
+    }
+});
+
+ipcMain.handle('get-random-action', () => {
+    const action = getRandomVrmaAction();
+    log.info(`[DEBUG] get-random-action returning: ${JSON.stringify(action)}`);
+    return action;
+});
+
 app.whenReady().then(() => {
     createPetWindow();
     setTimeout(() => {
@@ -697,6 +944,7 @@ app.whenReady().then(() => {
     installClaudeHooks();
     startCodexMonitor();
     stateCleanupTimer = setInterval(cleanupExternalSessions, 8000);
+    sleepCheckTimer = setInterval(maybeEnterSleepMode, 30000);
 });
 
 app.on('window-all-closed', () => {
@@ -723,6 +971,11 @@ app.on('before-quit', () => {
         clearInterval(stateCleanupTimer);
         stateCleanupTimer = null;
     }
+    if (sleepCheckTimer) {
+        clearInterval(sleepCheckTimer);
+        sleepCheckTimer = null;
+    }
+    clearTransientStateTimer();
     if (codexMonitor && typeof codexMonitor.stop === 'function') {
         codexMonitor.stop();
     }
