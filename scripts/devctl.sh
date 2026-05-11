@@ -38,6 +38,11 @@ pid_is_running() {
   kill -0 "${pid}" >/dev/null 2>&1
 }
 
+port_listener_pid() {
+  local port="$1"
+  lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+}
+
 process_group_is_running() {
   local pid="$1"
   kill -0 -- "-${pid}" >/dev/null 2>&1

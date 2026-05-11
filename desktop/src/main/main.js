@@ -3,6 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const log = require('electron-log');
 const { applyStationaryCollectionBehavior } = require('./mac-window');
 
@@ -94,6 +95,17 @@ const CODEX_AGENT_CONFIG = {
     },
 };
 
+const VOICE_CLIP_FILES = {
+    success_light_a: 'success_light_a.wav',
+    success_light_b: 'success_light_b.wav',
+    success_normal_a: 'success_normal_a.wav',
+    success_normal_b: 'success_normal_b.wav',
+    success_heavy_a: 'success_heavy_a.wav',
+    success_heavy_b: 'success_heavy_b.wav',
+    partial_issue_a: 'partial_issue_a.wav',
+    hard_failure_a: 'hard_failure_a.wav',
+};
+
 let petWindow = null;
 let hitWindow = null;
 let dialogWindow = null;
@@ -110,6 +122,14 @@ const externalSessions = new Map();
 
 function getSvgAssetPath(fileName) {
     return path.join(__dirname, '..', '..', 'assets', 'roxy', fileName);
+}
+
+function getVoiceAssetPath(voiceKey) {
+    const fileName = VOICE_CLIP_FILES[voiceKey];
+    if (!fileName) {
+        return null;
+    }
+    return path.join(__dirname, '..', '..', 'assets', 'voice', 'ja', fileName);
 }
 
 function resolveRendererEntry(distFileName) {
@@ -362,6 +382,43 @@ function startStateServer() {
     if (stateServer) return;
 
     stateServer = http.createServer((req, res) => {
+        if (req.method === 'POST' && req.url === '/play-tts') {
+            const chunks = [];
+            req.on('data', (chunk) => chunks.push(chunk));
+            req.on('end', () => {
+                try {
+                    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    if (!payload || typeof payload !== 'object') {
+                        throw new Error('Invalid TTS payload');
+                    }
+                    if (petWindow && !petWindow.isDestroyed()) {
+                        log.info('Received /play-tts request, forwarding to pet window');
+                        if (typeof payload.voiceKey === 'string' && payload.voiceKey.trim()) {
+                            const voicePath = getVoiceAssetPath(payload.voiceKey.trim());
+                            if (!voicePath || !fs.existsSync(voicePath)) {
+                                throw new Error(`Unknown voice key: ${payload.voiceKey}`);
+                            }
+                            petWindow.webContents.send('play-voice-asset', {
+                                voiceKey: payload.voiceKey.trim(),
+                                assetUrl: pathToFileURL(voicePath).href,
+                            });
+                        } else if (typeof payload.assetUrl === 'string' && payload.assetUrl.trim()) {
+                            petWindow.webContents.send('play-voice-asset', payload);
+                        } else {
+                            throw new Error('Invalid voice payload');
+                        }
+                    }
+                    res.writeHead(204);
+                    res.end();
+                } catch (error) {
+                    log.warn('Failed to process /play-tts payload:', error.message);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: false }));
+                }
+            });
+            return;
+        }
+
         if (req.method === 'POST' && req.url === '/state') {
             const chunks = [];
             req.on('data', (chunk) => chunks.push(chunk));
@@ -683,6 +740,23 @@ ipcMain.on('dialog-input-blur', () => {
 ipcMain.on('dialog-chat-busy', (_event, active) => {
     dialogChatBusy = !!active;
     broadcastPetState();
+});
+
+ipcMain.on('play-voice-key', (_event, voiceKey) => {
+    if (!petWindow || petWindow.isDestroyed() || typeof voiceKey !== 'string' || !voiceKey.trim()) {
+        return;
+    }
+    const voicePath = getVoiceAssetPath(voiceKey.trim());
+    if (!voicePath || !fs.existsSync(voicePath)) {
+        log.warn(`Voice asset not found for key: ${voiceKey}`);
+        return;
+    }
+    const payload = {
+        voiceKey: voiceKey.trim(),
+        assetUrl: pathToFileURL(voicePath).href,
+    };
+    log.info(`Forwarding voice asset to pet window: ${voiceKey}`);
+    petWindow.webContents.send('play-voice-asset', payload);
 });
 
 app.whenReady().then(() => {

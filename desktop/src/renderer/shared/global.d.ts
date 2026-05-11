@@ -19,6 +19,8 @@ type ChatStreamEvent =
         steps: number;
         tool_calls: number;
         errors: number;
+        subagent_calls?: number;
+        subagent_errors?: number;
       } | null;
     }
   | { type: "error"; error?: string };
@@ -41,6 +43,11 @@ type ConversationDetail = ConversationSummary & {
   }>;
 };
 
+type VoiceAssetPayload = {
+  voiceKey: string;
+  assetUrl: string;
+};
+
 interface ElectronAPI {
   dragLock: (locked: boolean) => void;
   dragMove: () => void;
@@ -54,6 +61,8 @@ interface ElectronAPI {
   notifyDialogInputFocus: () => void;
   notifyDialogInputBlur: () => void;
   onStateChange: (callback: (state: PetState, svgPath: string) => void) => void;
+  onPlayVoiceAsset: (callback: (payload: VoiceAssetPayload) => void) => () => void;
+  playVoiceKey: (voiceKey: string) => void;
   sendChatStream: (
     message: string,
     threadId?: string,

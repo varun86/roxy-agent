@@ -76,9 +76,10 @@ class OpenAIChatCompletionsClient:
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
         }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
