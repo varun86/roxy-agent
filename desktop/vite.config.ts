@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   base: "./",
+  assetsInclude: ["**/*.vrm", "**/*.fbx"],
   plugins: [react()],
   build: {
     outDir: "src/renderer-dist",

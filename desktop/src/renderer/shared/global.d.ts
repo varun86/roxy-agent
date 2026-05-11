@@ -87,3 +87,13 @@ declare global {
 }
 
 export {};
+
+declare module "*.vrm?url" {
+  const src: string;
+  export default src;
+}
+
+declare module "*.fbx?url" {
+  const src: string;
+  export default src;
+}

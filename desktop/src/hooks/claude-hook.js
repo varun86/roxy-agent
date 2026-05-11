@@ -4,15 +4,15 @@ const http = require('http');
 
 const SERVER_PORT = 23333;
 const EVENT_TO_STATE = {
-    SessionStart: 'idle',
+    SessionStart: 'lookAround',
     SessionEnd: 'sleeping',
     UserPromptSubmit: 'thinking',
-    PreToolUse: 'working',
-    PostToolUse: 'working',
-    PostToolUseFailure: 'working',
-    Stop: 'idle',
-    SubagentStart: 'working',
-    SubagentStop: 'working',
+    PreToolUse: 'thinking',
+    PostToolUse: 'task-success',
+    PostToolUseFailure: 'task-failure',
+    Stop: 'lookAround',
+    SubagentStart: 'thinking',
+    SubagentStop: 'task-success',
 };
 
 function readStdinJson() {

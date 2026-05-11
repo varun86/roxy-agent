@@ -12,16 +12,15 @@ log.transports.console.level = 'debug';
 
 const isMac = process.platform === 'darwin';
 const SERVER_PORT = 23333;
-const PET_SIZE = 150;
+const PET_SIZE = 340;
 const HIT_PADDING = 10;
 const SESSION_TTL_MS = 10 * 60 * 1000;
-const CODEX_TURN_COMPLETE_GRACE_MS = 4000;
+const TASK_SEQUENCE_MS = 3200;
+const DRAG_SLEEP_MS = 5 * 60 * 1000;
 
 const STATE_TO_SVG = {
-    idle: 'roxy-idle.svg',
-    working: 'roxy-working.svg',
-    'working-typing': 'roxy-working-typing.svg',
-    'react-drag': 'roxy-react-drag.svg',
+    thinking: 'roxy-thinking.svg',
+    lookAround: 'roxy-idle.svg',
 };
 
 const CLAUDE_HOOK_EVENTS = [
@@ -75,19 +74,19 @@ const DIALOG_CONFIG = {
 
 const CODEX_AGENT_CONFIG = {
     logEventMap: {
-        'session_meta': 'idle',
+        'session_meta': 'lookAround',
         'event_msg:task_started': 'thinking',
         'event_msg:user_message': 'thinking',
         'event_msg:agent_message': null,
-        'event_msg:exec_command_end': 'working',
-        'event_msg:patch_apply_end': 'working',
-        'event_msg:custom_tool_call_output': 'working',
-        'response_item:function_call': 'working',
-        'response_item:custom_tool_call': 'working',
-        'response_item:web_search_call': 'working',
-        'event_msg:task_complete': 'codex-turn-end',
-        'event_msg:context_compacted': 'idle',
-        'event_msg:turn_aborted': 'idle',
+        'event_msg:exec_command_end': 'thinking',
+        'event_msg:patch_apply_end': 'thinking',
+        'event_msg:custom_tool_call_output': 'thinking',
+        'response_item:function_call': 'thinking',
+        'response_item:custom_tool_call': 'thinking',
+        'response_item:web_search_call': 'thinking',
+        'event_msg:task_complete': 'task-success',
+        'event_msg:context_compacted': 'lookAround',
+        'event_msg:turn_aborted': 'task-failure',
     },
     logConfig: {
         sessionDir: '~/.codex/sessions',
@@ -116,7 +115,11 @@ let dragLocked = false;
 let dragSnapshot = null;
 let dragReactionActive = false;
 let chatModeActive = false;
-let currentPetState = 'idle';
+let currentPetState = 'lookAround';
+let sleepModeActive = false;
+let lastDragAt = Date.now();
+let transientStateTimer = null;
+let sleepCheckTimer = null;
 let dialogChatBusy = false;
 const externalSessions = new Map();
 
@@ -142,7 +145,7 @@ function resolveRendererEntry(distFileName) {
 }
 
 function getCurrentSvgPath() {
-    return getSvgAssetPath(STATE_TO_SVG[currentPetState] || STATE_TO_SVG.idle);
+    return getSvgAssetPath(STATE_TO_SVG[currentPetState] || STATE_TO_SVG.lookAround);
 }
 
 function sendToRenderer(channel, ...args) {
@@ -261,23 +264,65 @@ function syncDialogWindowPosition() {
 }
 
 function resolveVisualState() {
-    if (dragReactionActive) {
-        return 'react-drag';
-    }
-
     if (dialogChatBusy) {
-        return 'working-typing';
+        return 'thinking';
     }
+    for (const session of externalSessions.values()) {
+        if (session.state === 'thinking') {
+            return 'thinking';
+        }
+    }
+    return 'lookAround';
+}
+
+function clearTransientStateTimer() {
+    if (transientStateTimer) {
+        clearTimeout(transientStateTimer);
+        transientStateTimer = null;
+    }
+}
+
+function clearSleepMode() {
+    sleepModeActive = false;
+}
+
+function touchDragActivity() {
+    lastDragAt = Date.now();
+    if (sleepModeActive) {
+        clearSleepMode();
+        currentPetState = 'lookAround';
+    }
+}
+
+function setTransientState(nextState, delayMs = TASK_SEQUENCE_MS) {
+    clearTransientStateTimer();
+    clearSleepMode();
+    currentPetState = nextState;
+    broadcastPetState(true);
+    transientStateTimer = setTimeout(() => {
+        transientStateTimer = null;
+        currentPetState = 'lookAround';
+        broadcastPetState(true);
+    }, delayMs);
+}
+
+function maybeEnterSleepMode() {
+    if (dragReactionActive || dragLocked || dialogChatBusy) return;
 
     let hasBusy = false;
     for (const session of externalSessions.values()) {
-        if (session.state === 'working' || session.state === 'working-typing') {
+        if (session.state === 'thinking') {
             hasBusy = true;
+            break;
         }
     }
+    if (hasBusy) return;
 
-    if (hasBusy) return 'working-typing';
-    return 'idle';
+    if (Date.now() - lastDragAt >= DRAG_SLEEP_MS) {
+        sleepModeActive = true;
+        currentPetState = 'sleeping';
+        broadcastPetState(true);
+    }
 }
 
 function broadcastPetState(force = false) {
@@ -289,7 +334,10 @@ function broadcastPetState(force = false) {
 
 function normalizeExternalState(rawState) {
     if (rawState === 'working' || rawState === 'thinking' || rawState === 'working-typing') {
-        return 'working-typing';
+        return 'thinking';
+    }
+    if (rawState === 'lookAround') {
+        return 'lookAround';
     }
     return null;
 }
@@ -298,20 +346,6 @@ function clearExternalSessionTimer(session) {
     if (!session || !session.clearTimer) return;
     clearTimeout(session.clearTimer);
     session.clearTimer = null;
-}
-
-function scheduleExternalSessionClear(sessionId, delayMs = CODEX_TURN_COMPLETE_GRACE_MS) {
-    if (!sessionId) return;
-    const session = externalSessions.get(sessionId);
-    if (!session) return;
-    clearExternalSessionTimer(session);
-    session.clearTimer = setTimeout(() => {
-        const latest = externalSessions.get(sessionId);
-        if (!latest) return;
-        clearExternalSessionTimer(latest);
-        externalSessions.delete(sessionId);
-        broadcastPetState();
-    }, delayMs);
 }
 
 function upsertExternalSession(sessionId, state, meta = {}) {
@@ -362,20 +396,22 @@ function handleIncomingStateEvent(body) {
     const event = typeof body.event === 'string' ? body.event : '';
     const agentId = typeof body.agent_id === 'string' ? body.agent_id : 'external';
 
-    if (event === 'SessionEnd' || event === 'Stop') {
+    if (body.state === 'thinking') {
+        upsertExternalSession(sessionId, 'thinking', { event, agentId });
+        return;
+    }
+
+    if (body.state === 'lookAround') {
         upsertExternalSession(sessionId, null, { event, agentId });
         return;
     }
 
     const mappedState = normalizeExternalState(body.state);
-    if (!mappedState) {
-        if (body.state === 'idle' || body.state === 'sleeping' || body.state === 'attention') {
-            upsertExternalSession(sessionId, null, { event, agentId });
-        }
-        return;
+    if (mappedState === 'thinking') {
+        upsertExternalSession(sessionId, mappedState, { event, agentId });
+    } else {
+        upsertExternalSession(sessionId, null, { event, agentId });
     }
-
-    upsertExternalSession(sessionId, mappedState, { event, agentId });
 }
 
 function startStateServer() {
@@ -535,17 +571,11 @@ function startCodexMonitor() {
         const CodexLogMonitor = require('./codex-log-monitor');
         codexMonitor = new CodexLogMonitor(CODEX_AGENT_CONFIG, (sessionId, state, event) => {
             const mappedState = normalizeExternalState(state);
-            if (mappedState) {
-                upsertExternalSession(sessionId, mappedState, { event, agentId: 'codex' });
+            if (mappedState === 'thinking') {
+                upsertExternalSession(sessionId, 'thinking', { event, agentId: 'codex' });
                 return;
             }
-            if (state === 'idle' || state === 'attention') {
-                if (event === 'event_msg:task_complete') {
-                    scheduleExternalSessionClear(sessionId, CODEX_TURN_COMPLETE_GRACE_MS);
-                    return;
-                }
-                upsertExternalSession(sessionId, null, { event, agentId: 'codex' });
-            }
+            upsertExternalSession(sessionId, null, { event, agentId: 'codex' });
         });
         codexMonitor.start();
         log.info('Codex log monitor started');
@@ -661,6 +691,7 @@ function createDialogWindow() {
 
 ipcMain.on('drag-lock', (_event, locked) => {
     dragLocked = !!locked;
+    touchDragActivity();
     if (!dragLocked || !petWindow || petWindow.isDestroyed()) {
         dragSnapshot = null;
         syncLinkedWindows();
@@ -677,6 +708,7 @@ ipcMain.on('drag-lock', (_event, locked) => {
 
 ipcMain.on('drag-move', () => {
     if (!dragLocked || !dragSnapshot || !petWindow || petWindow.isDestroyed()) return;
+    touchDragActivity();
 
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
@@ -695,17 +727,20 @@ ipcMain.on('drag-move', () => {
 ipcMain.on('drag-end', () => {
     dragLocked = false;
     dragSnapshot = null;
+    touchDragActivity();
     syncLinkedWindows();
     syncDialogWindowPosition();
 });
 
 ipcMain.on('start-drag-reaction', () => {
     dragReactionActive = true;
+    touchDragActivity();
     broadcastPetState();
 });
 
 ipcMain.on('end-drag-reaction', () => {
     dragReactionActive = false;
+    touchDragActivity();
     broadcastPetState();
 });
 
@@ -771,6 +806,7 @@ app.whenReady().then(() => {
     installClaudeHooks();
     startCodexMonitor();
     stateCleanupTimer = setInterval(cleanupExternalSessions, 8000);
+    sleepCheckTimer = setInterval(maybeEnterSleepMode, 30000);
 });
 
 app.on('window-all-closed', () => {
@@ -797,6 +833,11 @@ app.on('before-quit', () => {
         clearInterval(stateCleanupTimer);
         stateCleanupTimer = null;
     }
+    if (sleepCheckTimer) {
+        clearInterval(sleepCheckTimer);
+        sleepCheckTimer = null;
+    }
+    clearTransientStateTimer();
     if (codexMonitor && typeof codexMonitor.stop === 'function') {
         codexMonitor.stop();
     }
