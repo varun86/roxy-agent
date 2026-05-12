@@ -8,11 +8,11 @@ const EVENT_TO_STATE = {
     SessionEnd: 'sleeping',
     UserPromptSubmit: 'thinking',
     PreToolUse: 'thinking',
-    PostToolUse: 'task-success',
-    PostToolUseFailure: 'task-failure',
-    Stop: 'task-success',
+    PostToolUse: 'thinking',         // Use sustained state so session stays active during tool use
+    PostToolUseFailure: 'thinking', // Use sustained state, not task-failure
+    Stop: 'task-success',           // Only Stop/TurnEnd should end the session
     SubagentStart: 'thinking',
-    SubagentStop: 'task-success',
+    SubagentStop: 'thinking',        // Use sustained state
 };
 
 function inferStopOutcome(payload) {

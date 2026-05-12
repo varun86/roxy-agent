@@ -243,11 +243,11 @@ export default function PetApp() {
         tempAction.loop = THREE.LoopOnce;
         tempAction.repetitions = 1;
         tempAction.play();
-        // After action finishes, revert to lookAround
+        // After action finishes, revert to the current state (not always lookAround)
         const onFinished = () => {
-          console.log('[PetApp] action finished, reverting to lookAround');
+          console.log('[PetApp] action finished, reverting to current state:', stateRef.current);
           tempAction.stop();
-          activateAction("lookAround", "hold");
+          activateAction(stateRef.current, stateRef.current === "thinking" ? "loop" : "hold");
           mixer?.removeEventListener("finished", onFinished);
         };
         mixer?.addEventListener("finished", onFinished);
