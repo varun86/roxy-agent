@@ -6,6 +6,7 @@ import thinkingSvg from "../../../assets/roxy/roxy-thinking.svg";
 type MessageRole = "assistant" | "user";
 type ConversationSummary = Awaited<ReturnType<typeof window.electronAPI.fetchConversations>>[number];
 type ConversationDetail = Awaited<ReturnType<typeof window.electronAPI.fetchConversation>>;
+type ReminderDetail = Awaited<ReturnType<typeof window.electronAPI.fetchReminder>>;
 
 type TraceSummary = {
   steps: number;
@@ -67,6 +68,15 @@ function buildMessagesFromConversation(detail: ConversationDetail): ChatMessage[
     id: message.id,
     role: message.role,
     content: message.content,
+    isError: Boolean(message.is_error),
+    toolEvents: (message.tool_events ?? []).map((toolEvent) => ({
+      callId: toolEvent.call_id,
+      toolName: toolEvent.tool_name,
+      arguments: toolEvent.arguments ?? {},
+      output: toolEvent.output ?? "",
+      isError: Boolean(toolEvent.is_error),
+    })),
+    trace: message.trace ?? null,
   }));
 }
 
@@ -87,6 +97,17 @@ function formatRelativeTime(value: string) {
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 7) return `${diffDays} 天前`;
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function toPreviewText(userText: string, assistantText: string) {
@@ -221,6 +242,8 @@ export default function DialogApp() {
   const [isConversationListLoading, setIsConversationListLoading] = useState(false);
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [isConversationSheetOpen, setIsConversationSheetOpen] = useState(false);
+  const [activeReminder, setActiveReminder] = useState<ReminderDetail | null>(null);
+  const [isReminderLoading, setIsReminderLoading] = useState(false);
 
   const messagesContainerRef = useRef<HTMLElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -295,6 +318,13 @@ export default function DialogApp() {
   }, [selectedTurnId]);
 
   useEffect(() => {
+    if (activeReminder) {
+      setIsConversationSheetOpen(false);
+      setSelectedTurnId(null);
+    }
+  }, [activeReminder]);
+
+  useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
 
@@ -303,12 +333,17 @@ export default function DialogApp() {
         return;
       }
 
+      if (activeReminder) {
+        setActiveReminder(null);
+        return;
+      }
+
       setIsConversationSheetOpen(false);
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedTurnId]);
+  }, [activeReminder, selectedTurnId]);
 
   useEffect(() => {
     let disposed = false;
@@ -430,6 +465,53 @@ export default function DialogApp() {
       isCancelled = true;
     };
   }, [activeThreadId, isOnline]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onOpenReminderCard((payload) => {
+      void openReminderCard(payload.reminderId, payload.threadId ?? null);
+    });
+    return unsubscribe;
+  }, [isOnline]);
+
+  const openReminderCard = async (reminderId: string, fallbackThreadId: string | null) => {
+    if (!reminderId) return;
+    setIsReminderLoading(true);
+    setIsConversationSheetOpen(false);
+    setSelectedTurnId(null);
+    try {
+      const reminder = await window.electronAPI.fetchReminder(reminderId);
+      const threadId = reminder.thread_id || fallbackThreadId;
+      if (threadId) {
+        threadIdRef.current = threadId;
+        setActiveThreadId(threadId);
+        window.localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, threadId);
+        const detail = await window.electronAPI.fetchConversation(threadId);
+        setMessages(buildMessagesFromConversation(detail));
+        setConversations((prev) =>
+          upsertConversation(prev, {
+            thread_id: detail.thread_id,
+            title: detail.title,
+            created_at: detail.created_at,
+            updated_at: detail.updated_at,
+            last_message_preview: detail.last_message_preview,
+            message_count: detail.message_count,
+          })
+        );
+      }
+      setActiveReminder(reminder);
+    } catch (error) {
+      console.error("Failed to open reminder card:", error);
+      pushMessage({
+        id: createId("assistant"),
+        role: "assistant",
+        content: "提醒卡片载入失败，请稍后再试。",
+        isError: true,
+        includeInHistory: false,
+      });
+    } finally {
+      setIsReminderLoading(false);
+    }
+  };
 
   const getConversationHistory = () =>
     messages
@@ -1165,6 +1247,67 @@ export default function DialogApp() {
                 </div>
               </>
             ) : null}
+          </div>
+        </div>
+
+        <div
+          className={`reminder-overlay${activeReminder || isReminderLoading ? " visible" : ""}`}
+          aria-hidden={activeReminder || isReminderLoading ? "false" : "true"}
+          onClick={() => setActiveReminder(null)}
+        >
+          <div
+            className="reminder-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reminder-card-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="reminder-card-top">
+              <div>
+                <p className="reminder-kicker">Roxy Reminder</p>
+                <h2 id="reminder-card-title">{activeReminder?.title || "提醒时间到了"}</h2>
+              </div>
+              <span className={`reminder-status ${activeReminder?.status || "loading"}`}>
+                {activeReminder?.status === "fired" ? "已触发" : isReminderLoading ? "载入中" : "待处理"}
+              </span>
+            </div>
+
+            <div className="reminder-message">
+              {isReminderLoading ? "Roxy 正在翻开这张提醒卡..." : activeReminder?.message || "这条提醒没有内容。"}
+            </div>
+
+            {activeReminder ? (
+              <dl className="reminder-meta-list">
+                <div className="reminder-meta-row">
+                  <dt>提醒</dt>
+                  <dd>{formatDateTime(activeReminder.trigger_at)}</dd>
+                </div>
+                <div className="reminder-meta-row">
+                  <dt>触发</dt>
+                  <dd>{activeReminder.fired_at ? formatDateTime(activeReminder.fired_at) : "尚未触发"}</dd>
+                </div>
+                <div className="reminder-meta-row">
+                  <dt>对白</dt>
+                  <dd>{activeReminder.thread_id ? activeReminder.thread_id.slice(-8) : "未绑定"}</dd>
+                </div>
+              </dl>
+            ) : null}
+
+            <div className="reminder-actions">
+              <button type="button" className="reminder-secondary" onClick={() => setActiveReminder(null)}>
+                知道了
+              </button>
+              <button
+                type="button"
+                className="reminder-primary"
+                onClick={() => {
+                  setActiveReminder(null);
+                  messageInputRef.current?.focus();
+                }}
+              >
+                回到对白
+              </button>
+            </div>
           </div>
         </div>
       </div>

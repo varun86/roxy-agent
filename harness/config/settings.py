@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from harness.rag.config import RagConfig, load_rag_config
@@ -70,8 +70,8 @@ class HarnessConfig:
     sandbox: SandboxConfig
     runtime: RuntimeConfig
     memory: MemoryConfig
-    local_browser: LocalBrowserConfig
-    rag: RagConfig
+    local_browser: LocalBrowserConfig = field(default_factory=LocalBrowserConfig)
+    rag: RagConfig = field(default_factory=RagConfig)
 
     def get_model(self, model_name: str | None = None) -> RegisteredModel:
         target_name = model_name or self.default_model

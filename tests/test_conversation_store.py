@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from harness.context import ConversationStore
+from harness.context import ConversationStore, ConversationTrace, ToolCallEvent
 
 
 def test_conversation_store_creates_and_appends_turns(tmp_path):
@@ -84,3 +84,48 @@ def test_conversation_store_skips_corrupt_summary_files(tmp_path):
 
     assert len(summaries) == 1
     assert summaries[0].thread_id == "valid"
+
+
+def test_conversation_store_persists_tool_events_and_trace(tmp_path):
+    store = ConversationStore()
+    conversation_path = tmp_path / "threads" / "t1" / "conversation.json"
+    messages_path = tmp_path / "threads" / "t1" / "messages.json"
+
+    updated = store.append_turn(
+        "t1",
+        user_message="hello world",
+        assistant_message="reply text",
+        assistant_is_error=True,
+        assistant_tool_events=[
+            ToolCallEvent(
+                call_id="call-1",
+                tool_name="read_file",
+                arguments={"path": "README.md"},
+                output="ok",
+                is_error=False,
+            )
+        ],
+        assistant_trace=ConversationTrace(
+            steps=2,
+            tool_calls=1,
+            errors=0,
+            subagent_calls=0,
+            subagent_errors=0,
+        ),
+        conversation_path=conversation_path,
+        messages_path=messages_path,
+    )
+
+    assistant = updated.messages[1]
+    assert assistant.is_error is True
+    assert assistant.tool_events[0].tool_name == "read_file"
+    assert assistant.trace is not None
+    assert assistant.trace.tool_calls == 1
+
+    reloaded = store.load_conversation("t1", conversation_path=conversation_path, messages_path=messages_path)
+    assert reloaded is not None
+    reloaded_assistant = reloaded.messages[1]
+    assert reloaded_assistant.is_error is True
+    assert reloaded_assistant.tool_events[0].call_id == "call-1"
+    assert reloaded_assistant.trace is not None
+    assert reloaded_assistant.trace.steps == 2

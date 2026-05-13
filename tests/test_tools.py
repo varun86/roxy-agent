@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from harness.models.types import RuntimeContext, ToolCall
 from harness.sandbox.runtime import BasicSandbox
+from harness.scheduler import ReminderScheduler
 from harness.tools.executor import ToolExecutor
 from harness.tools.local_browser import LocalBrowserClient
 from harness.tools.registry import ToolRegistry, ToolRuntime
@@ -164,3 +167,61 @@ async def test_browser_tool_failure_sets_error_result(tmp_path):
     assert result.is_error is True
     assert "Tool execution error (browser_open)" in result.output
     assert "gui unavailable" in result.output
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_create_reminder(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    reminders = ReminderScheduler(tmp_path / "reminders.json")
+    registry = ToolRegistry.with_default_tools(sandbox)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext(thread_id="thread-a", reminders=reminders)))
+    trigger_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+
+    result = await executor.execute_tool_call(
+        ToolCall(
+            id="10",
+            name="create_reminder",
+            arguments={"message": "Stand up and drink water", "trigger_at": trigger_at, "title": "Hydrate"},
+        )
+    )
+
+    tool_names = {item["function"]["name"] for item in registry.list_tool_schemas()}
+    reminders_list = await reminders.list_reminders()
+    assert "create_reminder" in tool_names
+    assert result.is_error is False
+    assert "Reminder created" in result.output
+    assert reminders_list[0].thread_id == "thread-a"
+    assert reminders_list[0].message == "Stand up and drink water"
+
+
+@pytest.mark.asyncio
+async def test_create_reminder_rejects_past_time(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    reminders = ReminderScheduler(tmp_path / "reminders.json")
+    registry = ToolRegistry.with_default_tools(sandbox)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext(reminders=reminders)))
+    trigger_at = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+
+    result = await executor.execute_tool_call(
+        ToolCall(id="11", name="create_reminder", arguments={"message": "Too late", "trigger_at": trigger_at})
+    )
+
+    assert result.is_error is True
+    assert "trigger_at must be in the future" in result.output
+
+
+def test_tool_schema_descriptions_emphasize_browser_and_reminder_triggers(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    registry = ToolRegistry.with_default_tools(sandbox)
+    schemas = {item["function"]["name"]: item["function"]["description"] for item in registry.list_tool_schemas()}
+
+    browser_search = schemas["browser_search"]
+    browser_open = schemas["browser_open"]
+    reminder = schemas["create_reminder"]
+
+    assert "Examples:" in browser_search
+    assert "Never claim the browser was opened unless this tool call actually succeeded." in browser_search
+    assert "open localhost:3000 in my browser" in browser_open
+    assert "Never say a page has been opened unless this tool call actually succeeded." in browser_open
+    assert "Examples:" in reminder
+    assert "Never claim the reminder is scheduled unless this tool call actually succeeded." in reminder

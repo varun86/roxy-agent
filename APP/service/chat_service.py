@@ -6,9 +6,17 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from harness.client import HarnessClient
-from harness.context import ConversationStore, ThreadContextStore, ThreadRuntimeResolver, generate_thread_id
+from harness.context import (
+    ConversationStore,
+    ConversationTrace,
+    ThreadContextStore,
+    ThreadRuntimeResolver,
+    ToolCallEvent,
+    generate_thread_id,
+)
 from harness.memory import get_memory_queue
 from harness.models.types import AgentRunResult
+from harness.scheduler import Reminder
 
 
 class ChatService:
@@ -77,6 +85,36 @@ class ChatService:
         except Exception:
             return
 
+    @staticmethod
+    def _build_trace_info(result: AgentRunResult) -> ConversationTrace:
+        return ConversationTrace(
+            steps=result.trace.steps,
+            tool_calls=result.trace.tool_calls,
+            errors=result.trace.errors,
+            subagent_calls=result.trace.subagent_calls,
+            subagent_errors=result.trace.subagent_errors,
+        )
+
+    @staticmethod
+    def _build_tool_event(event: dict[str, object]) -> ToolCallEvent | None:
+        if event.get("type") != "tool_called":
+            return None
+        call_id = event.get("call_id")
+        tool_name = event.get("tool_name")
+        arguments = event.get("arguments")
+        output = event.get("output")
+        if not isinstance(call_id, str) or not call_id:
+            return None
+        if not isinstance(tool_name, str) or not tool_name:
+            return None
+        return ToolCallEvent(
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=arguments if isinstance(arguments, dict) else {},
+            output=output if isinstance(output, str) else "",
+            is_error=bool(event.get("is_error")),
+        )
+
     def create_conversation(self, thread_id: str | None = None) -> Any:
         resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
         thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
@@ -142,6 +180,13 @@ class ChatService:
             context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
             history = self._build_history(resolved_thread_id, messages=messages)
 
+            tool_events: list[ToolCallEvent] = []
+
+            async def on_event(event: dict[str, object]) -> None:
+                tool_event = self._build_tool_event(event)
+                if tool_event is not None:
+                    tool_events.append(tool_event)
+
             result = await self._client.run_async(
                 message,
                 model,
@@ -150,6 +195,7 @@ class ChatService:
                 thread_paths=thread_paths,
                 pinned_skills=context.pinned_skills,
                 compact_summary=context.compact_summary,
+                event_callback=on_event,
             )
 
             self._context_store.update_after_turn(
@@ -164,6 +210,8 @@ class ChatService:
                 resolved_thread_id,
                 user_message=message,
                 assistant_message=result.text,
+                assistant_tool_events=tool_events,
+                assistant_trace=self._build_trace_info(result),
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
             )
@@ -187,11 +235,15 @@ class ChatService:
         yield {"type": "start"}
 
         queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        tool_events: list[ToolCallEvent] = []
 
         async def on_text_delta(delta: str) -> None:
             await queue.put({"type": "delta", "delta": delta})
 
         async def on_event(event: dict[str, object]) -> None:
+            tool_event = self._build_tool_event(event)
+            if tool_event is not None:
+                tool_events.append(tool_event)
             await queue.put(event)
 
         resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
@@ -242,6 +294,8 @@ class ChatService:
                 resolved_thread_id,
                 user_message=message,
                 assistant_message=result.text,
+                assistant_tool_events=tool_events,
+                assistant_trace=self._build_trace_info(result),
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
             )
@@ -268,6 +322,15 @@ class ChatService:
 
     def list_models(self) -> list[dict[str, Any]]:
         return self._client.list_models()
+
+    async def start_reminders(self) -> None:
+        await self._client.reminders.start()
+
+    async def stop_reminders(self) -> None:
+        await self._client.reminders.stop()
+
+    async def get_reminder(self, reminder_id: str) -> Reminder | None:
+        return await self._client.reminders.get_reminder(reminder_id)
 
 
 _service: ChatService | None = None

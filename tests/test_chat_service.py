@@ -8,7 +8,8 @@ import pytest
 
 from APP.service.chat_service import ChatService
 from harness.context import normalize_thread_id
-from harness.models.types import AgentRunResult
+from harness.models.types import AgentRunResult, AgentTrace
+from harness.scheduler import ReminderScheduler
 
 
 class FakeHarnessClient:
@@ -31,6 +32,7 @@ class FakeHarnessClient:
                 max_injection_tokens=1200,
             ),
         )
+        self.reminders = ReminderScheduler(sandbox_root / "reminders.json")
         self.calls: list[dict[str, object]] = []
 
     async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
@@ -51,6 +53,17 @@ class FakeStreamingHarnessClient(FakeHarnessClient):
         if event_callback is not None:
             await event_callback(
                 {
+                    "type": "tool_called",
+                    "call_id": "call_1",
+                    "tool_name": "read_file",
+                    "arguments": {"path": "README.md"},
+                    "output": "hello",
+                    "is_error": False,
+                }
+            )
+        if event_callback is not None:
+            await event_callback(
+                {
                     "type": "task_started",
                     "task_id": "task_1",
                     "description": "inspect",
@@ -61,7 +74,7 @@ class FakeStreamingHarnessClient(FakeHarnessClient):
             await on_text_delta("hello")
         if event_callback is not None:
             await event_callback({"type": "task_completed", "task_id": "task_1", "result": "done"})
-        return AgentRunResult(text="hello")
+        return AgentRunResult(text="hello", trace=AgentTrace(tool_calls=1))
 
 
 @pytest.mark.asyncio
@@ -126,6 +139,13 @@ async def test_chat_service_stream_emits_subagent_events(tmp_path):
     assert done_event["type"] == "done"
     assert done_event["thread_id"] == "thread-a"
     assert done_event["trace"]["subagent_calls"] == 0
+
+    detail = service.get_conversation("thread-a")
+    assert detail is not None
+    assistant_message = detail.messages[1]
+    assert assistant_message.tool_events[0].tool_name == "read_file"
+    assert assistant_message.trace is not None
+    assert assistant_message.trace.tool_calls == 1
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, screen } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
@@ -147,6 +147,7 @@ const VOICE_CLIP_FILES = {
     success_heavy_b: 'success_heavy_b.wav',
     partial_issue_a: 'partial_issue_a.wav',
     hard_failure_a: 'hard_failure_a.wav',
+    reminder_due_a: 'reminder_due_a.wav',
 };
 
 const EXTERNAL_COMPLETION_EVENTS = {
@@ -185,6 +186,7 @@ let hasPlayedIntroVoice = false;
 const externalSessions = new Map();
 const voiceRotationState = new Map();
 const externalCompletionCooldown = new Map();
+const pendingReminderCards = [];
 
 function getSvgAssetPath(fileName) {
     return path.join(__dirname, '..', '..', 'assets', 'roxy', fileName);
@@ -666,6 +668,24 @@ function startStateServer() {
             return;
         }
 
+        if (req.method === 'POST' && req.url === '/reminder') {
+            const chunks = [];
+            req.on('data', (chunk) => chunks.push(chunk));
+            req.on('end', () => {
+                try {
+                    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    handleReminderDue(payload);
+                    res.writeHead(204);
+                    res.end();
+                } catch (error) {
+                    log.warn('Failed to process /reminder payload:', error.message);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: false }));
+                }
+            });
+            return;
+        }
+
         if (req.method === 'GET' && req.url === '/state') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, state: currentPetState }));
@@ -867,6 +887,7 @@ function createDialogWindow() {
         dialogWindow.show();
         dialogWindow.focus();
         syncDialogWindowPosition();
+        flushPendingReminderCards();
         return;
     }
 
@@ -878,11 +899,15 @@ function createDialogWindow() {
     });
 
     dialogWindow.loadFile(resolveRendererEntry('dialog.html'));
+    dialogWindow.webContents.on('did-finish-load', () => {
+        flushPendingReminderCards();
+    });
     dialogWindow.once('ready-to-show', () => {
         enterChatMode();
         dialogWindow.showInactive();
         reapplyMacVisibility(dialogWindow, { mode: 'dialog' });
         dialogWindow.focus();
+        flushPendingReminderCards();
     });
     dialogWindow.on('blur', () => {
         syncDialogWindowPosition();
@@ -891,6 +916,48 @@ function createDialogWindow() {
         dialogWindow = null;
         exitChatMode();
     });
+}
+
+function flushPendingReminderCards() {
+    if (!dialogWindow || dialogWindow.isDestroyed() || dialogWindow.webContents.isLoading()) {
+        return;
+    }
+    while (pendingReminderCards.length > 0) {
+        dialogWindow.webContents.send('open-reminder-card', pendingReminderCards.shift());
+    }
+}
+
+function showSystemReminderNotification(payload) {
+    if (!Notification.isSupported()) {
+        return;
+    }
+    const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Roxy Reminder';
+    const body = typeof payload.message === 'string' && payload.message.trim() ? payload.message.trim() : 'Reminder is due.';
+    try {
+        new Notification({ title, body }).show();
+    } catch (error) {
+        log.warn(`Failed to show reminder notification: ${error.message}`);
+    }
+}
+
+function handleReminderDue(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return;
+    }
+    const reminderId = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : '';
+    if (!reminderId) {
+        return;
+    }
+    const reminderPayload = {
+        reminderId,
+        threadId: typeof payload.thread_id === 'string' ? payload.thread_id : null,
+    };
+    pendingReminderCards.push(reminderPayload);
+    createDialogWindow();
+    emitVoiceKey('reminder_due_a');
+    playRandomPetAction();
+    showSystemReminderNotification(payload);
+    flushPendingReminderCards();
 }
 
 ipcMain.on('drag-lock', (_event, locked) => {

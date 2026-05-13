@@ -58,6 +58,14 @@ def test_build_system_instructions_includes_browser_tool_governance():
     assert "Do not say that a browser page was opened unless the corresponding browser tool call actually succeeded." in instructions
 
 
+def test_build_system_instructions_includes_reminder_tool_governance():
+    instructions = build_system_instructions([])
+
+    assert "<runtime_clock>" in instructions
+    assert "When the user asks for a reminder, timer, alarm, countdown, wake-up, or later notification" in instructions
+    assert "Never claim that a reminder has been scheduled unless create_reminder actually succeeded." in instructions
+
+
 def test_build_system_instructions_preserves_pinned_skill_priority():
     instructions = build_system_instructions([], pinned_skills=["roxy-skill"])
 

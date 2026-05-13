@@ -9,6 +9,7 @@ from APP.dto.chat import (
     ConversationRenameRequest,
     ConversationSummary,
     ModelInfo,
+    ReminderDetail,
     TraceInfo,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "ConversationRenameRequest",
     "ConversationSummary",
     "ModelInfo",
+    "ReminderDetail",
     "TraceInfo",
 ]

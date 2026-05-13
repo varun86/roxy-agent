@@ -19,6 +19,7 @@ from APP.dto import (
     ConversationRenameRequest,
     ConversationSummary,
     ModelInfo,
+    ReminderDetail,
     TraceInfo,
 )
 from APP.service import get_chat_service
@@ -133,6 +134,28 @@ async def get_conversation(thread_id: str) -> ConversationDetail:
                 "role": item.role,
                 "content": item.content,
                 "created_at": item.created_at,
+                "is_error": item.is_error,
+                "tool_events": [
+                    {
+                        "call_id": tool_event.call_id,
+                        "tool_name": tool_event.tool_name,
+                        "arguments": tool_event.arguments,
+                        "output": tool_event.output,
+                        "is_error": tool_event.is_error,
+                    }
+                    for tool_event in item.tool_events
+                ],
+                "trace": (
+                    {
+                        "steps": item.trace.steps,
+                        "tool_calls": item.trace.tool_calls,
+                        "errors": item.trace.errors,
+                        "subagent_calls": item.trace.subagent_calls,
+                        "subagent_errors": item.trace.subagent_errors,
+                    }
+                    if item.trace is not None
+                    else None
+                ),
             }
             for item in detail.messages
         ],
@@ -175,6 +198,26 @@ async def delete_conversation(thread_id: str) -> dict:
     return {"status": "deleted", "thread_id": thread_id}
 
 
+@router.get("/reminders/{reminder_id}", response_model=ReminderDetail, summary="Get reminder details")
+async def get_reminder(reminder_id: str) -> ReminderDetail:
+    service = get_chat_service()
+    reminder = await service.get_reminder(reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=404, detail=f"Reminder not found: {reminder_id}")
+    return ReminderDetail(
+        id=reminder.id,
+        thread_id=reminder.thread_id,
+        title=reminder.title,
+        message=reminder.message,
+        trigger_at=reminder.trigger_at,
+        timezone=reminder.timezone,
+        status=reminder.status,
+        created_at=reminder.created_at,
+        fired_at=reminder.fired_at,
+        delivery_error=reminder.delivery_error,
+    )
+
+
 @router.get("/health", summary="Health check")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -182,8 +225,12 @@ async def health() -> dict[str, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_chat_service()
-    yield
+    service = get_chat_service()
+    await service.start_reminders()
+    try:
+        yield
+    finally:
+        await service.stop_reminders()
 
 
 def create_app() -> FastAPI:

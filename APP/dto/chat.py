@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HistoryMessage(BaseModel):
@@ -23,6 +23,14 @@ class TraceInfo(BaseModel):
     subagent_errors: int = 0
 
 
+class ToolCallEventInfo(BaseModel):
+    call_id: str
+    tool_name: str
+    arguments: dict[str, object]
+    output: str
+    is_error: bool = False
+
+
 class ChatResponse(BaseModel):
     text: str
     trace: TraceInfo
@@ -34,6 +42,9 @@ class ConversationMessage(BaseModel):
     role: str
     content: str
     created_at: str
+    is_error: bool = False
+    tool_events: list[ToolCallEventInfo] = Field(default_factory=list)
+    trace: TraceInfo | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -55,6 +66,19 @@ class ConversationCreateResponse(ConversationSummary):
 
 class ConversationRenameRequest(BaseModel):
     title: str
+
+
+class ReminderDetail(BaseModel):
+    id: str
+    thread_id: str | None = None
+    title: str
+    message: str
+    trigger_at: str
+    timezone: str
+    status: str
+    created_at: str
+    fired_at: str | None = None
+    delivery_error: str | None = None
 
 
 class ModelInfo(BaseModel):

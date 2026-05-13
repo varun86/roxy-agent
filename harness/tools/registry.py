@@ -139,6 +139,40 @@ class ToolRegistry:
             top_k = int(args.get("top_k", 5))
             return await asyncio.to_thread(lambda: service.render_search_results(query, top_k=top_k))
 
+        async def create_reminder_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
+            if runtime.context.reminders is None:
+                raise RuntimeError("Reminder scheduler is unavailable.")
+            message = str(args.get("message", "")).strip()
+            trigger_at = str(args.get("trigger_at", "")).strip()
+            timezone = str(args.get("timezone", "Asia/Shanghai")).strip() or "Asia/Shanghai"
+            title = str(args.get("title", "")).strip() or None
+            reminder = await runtime.context.reminders.create_reminder(
+                message=message,
+                trigger_at=trigger_at,
+                timezone=timezone,
+                title=title,
+                thread_id=runtime.context.thread_id,
+            )
+            if runtime.emit_event is not None:
+                maybe = runtime.emit_event(
+                    {
+                        "type": "reminder_created",
+                        "reminder_id": reminder.id,
+                        "thread_id": reminder.thread_id,
+                        "title": reminder.title,
+                        "message": reminder.message,
+                        "trigger_at": reminder.trigger_at,
+                        "timezone": reminder.timezone,
+                    }
+                )
+                if maybe is not None:
+                    await maybe
+            return (
+                "Reminder created. "
+                f"id={reminder.id}; title={reminder.title}; "
+                f"trigger_at={reminder.trigger_at}; message={reminder.message}"
+            )
+
         async def task_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             if runtime.context.subagent_depth > 0:
                 raise RuntimeError("Nested subagents are disabled.")
@@ -226,9 +260,14 @@ class ToolRegistry:
                 ToolSpec(
                     name="browser_search",
                     description=(
-                        "Open the local default browser with a search query. "
-                        "Use this when the user explicitly wants the browser to open and search on the host machine. "
-                        "This opens a search results page only; it does not read the webpage content back."
+                        "Open the user's local default browser with a search query on the host machine. "
+                        "Call this when the user explicitly asks you to open the browser, search in the browser, "
+                        "launch a search page, or perform a browser-side search instead of only talking about it. "
+                        "Examples: '打开浏览器搜一下洛琪希', 'open the browser and search for the React docs', "
+                        "or '帮我在浏览器里搜今天的天气'. "
+                        "Do not use this tool for research that should be read back into the conversation; use web_search "
+                        "or knowledge_search for that. This tool only opens the search results page locally and does not "
+                        "return webpage contents. Never claim the browser was opened unless this tool call actually succeeded."
                     ),
                     parameters={
                         "type": "object",
@@ -248,8 +287,11 @@ class ToolRegistry:
                 ToolSpec(
                     name="browser_open",
                     description=(
-                        "Open an http or https URL in the local default browser. "
-                        "Use this only for host-side browser actions; this tool does not fetch or summarize page contents."
+                        "Open a specific http or https URL in the user's local default browser on the host machine. "
+                        "Call this when the user explicitly wants a page opened, such as '打开 https://openai.com', "
+                        "'open localhost:3000 in my browser', or '帮我把这个网页点开'. "
+                        "Do not use this tool to inspect, fetch, or summarize the page contents; it only performs the local "
+                        "browser action. Never say a page has been opened unless this tool call actually succeeded."
                     ),
                     parameters={
                         "type": "object",
@@ -303,6 +345,44 @@ class ToolRegistry:
                 },
             ),
             web_search_tool,
+        )
+        registry.register(
+            ToolSpec(
+                name="create_reminder",
+                description=(
+                    "Create a one-time future reminder that will notify the user after this chat turn ends. "
+                    "Call this whenever the user explicitly asks to be reminded later, notified at a future time, "
+                    "woken up later, or given a timer, alarm, countdown, or delayed nudge. "
+                    "Examples: '10分钟后提醒我开会', 'tomorrow at 8am remind me to stretch', "
+                    "or '半小时后叫我取快递'. Convert relative times like 'in 30 minutes' into an absolute ISO 8601 "
+                    "trigger_at before calling this tool. If the user asks you to set the reminder, you should call this "
+                    "tool instead of only promising to remember it. Never claim the reminder is scheduled unless this tool "
+                    "call actually succeeded."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "What the reminder should tell the user to do.",
+                        },
+                        "trigger_at": {
+                            "type": "string",
+                            "description": "Absolute ISO 8601 datetime for the reminder.",
+                        },
+                        "timezone": {
+                            "type": "string",
+                            "description": "IANA timezone for naive trigger_at values. Default: Asia/Shanghai.",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Short display title for the reminder card.",
+                        },
+                    },
+                    "required": ["message", "trigger_at"],
+                },
+            ),
+            create_reminder_tool,
         )
 
         if include_task_tool:

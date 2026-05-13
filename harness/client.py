@@ -15,6 +15,7 @@ from harness.models.types import AgentRunResult, RuntimeContext
 from harness.memory import format_memory_for_injection, get_memory_data
 from harness.rag import KnowledgeBaseService
 from harness.sandbox.runtime import BasicSandbox
+from harness.scheduler import ReminderScheduler
 from harness.skills import Skill, load_skills
 from harness.subagents import (
     SubagentExecutor,
@@ -45,8 +46,13 @@ class HarnessClient:
         self.config = config or load_harness_config(self._project_root)
         self._sandbox_root = self.config.sandbox.root_dir
         self._knowledge_base: KnowledgeBaseService | None = None
+        self._reminders = ReminderScheduler(self.config.sandbox.root_dir / "reminders.json")
         self._skills_cache_key: tuple[Any, ...] | None = None
         self._skills_cache_value: list[Skill] | None = None
+
+    @property
+    def reminders(self) -> ReminderScheduler:
+        return self._reminders
 
     def _get_knowledge_base(self) -> KnowledgeBaseService:
         if self._knowledge_base is None:
@@ -156,6 +162,7 @@ class HarnessClient:
             max_subagents=self.config.runtime.max_concurrent_subagents,
             subagent_timeout_seconds=self.config.runtime.subagent_timeout_seconds,
             knowledge_base=knowledge_base,
+            reminders=self._reminders,
         )
 
     def _make_sandbox(self, thread_paths: ThreadRuntimePaths | None) -> BasicSandbox:

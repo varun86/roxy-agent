@@ -76,5 +76,14 @@ export interface ConversationDetail extends ConversationSummary {
     role: "user" | "assistant";
     content: string;
     created_at: string;
+    is_error?: boolean;
+    tool_events?: Array<{
+      call_id: string;
+      tool_name: string;
+      arguments: Record<string, unknown>;
+      output: string;
+      is_error?: boolean;
+    }>;
+    trace?: StreamTraceInfo | null;
   }>;
 }

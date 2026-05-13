@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from harness.skills.types import Skill
 
 
@@ -15,7 +18,9 @@ BASE_INSTRUCTIONS = (
     "When the user explicitly asks you to open the browser, launch a search, or open a webpage on the host machine, you must call browser_search or browser_open rather than merely describing the action. "
     "Do not say that a browser page was opened unless the corresponding browser tool call actually succeeded. "
     "If the user wants you to investigate and summarize information, prefer web_search or knowledge_search first. "
-    "If the user explicitly wants the browser opened or a search launched on the host machine, use browser_search or browser_open."
+    "If the user explicitly wants the browser opened or a search launched on the host machine, use browser_search or browser_open. "
+    "When the user asks for a reminder, timer, alarm, countdown, wake-up, or later notification, you must call create_reminder when that tool is available. "
+    "Never claim that a reminder has been scheduled unless create_reminder actually succeeded."
 )
 
 
@@ -89,6 +94,17 @@ def get_long_term_memory_section(memory_text: str | None = None) -> str:
     )
 
 
+def get_runtime_clock_section(*, timezone: str = "Asia/Shanghai") -> str:
+    now = datetime.now(ZoneInfo(timezone))
+    return (
+        "<runtime_clock>\n"
+        f"Current local time: {now.isoformat()}\n"
+        f"Timezone: {timezone}\n"
+        "Use this clock to convert relative reminder requests like 'in 30 minutes' into absolute ISO 8601 trigger_at values.\n"
+        "</runtime_clock>"
+    )
+
+
 def get_subagent_section(*, max_concurrent_subagents: int) -> str:
     return (
         "<subagent_system>\n"
@@ -119,6 +135,7 @@ def build_system_instructions(
     memory_section = get_long_term_memory_section(memory_text)
 
     parts = [BASE_INSTRUCTIONS]
+    parts.append(get_runtime_clock_section())
     if section:
         parts.append(section)
     if pinned_skills or compact_summary:
