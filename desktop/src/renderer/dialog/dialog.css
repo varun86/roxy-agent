@@ -349,7 +349,38 @@ body {
   animation: shimmer 1.6s infinite linear;
 }
 
-.session-card-top,
+.session-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.session-card-delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: rgba(255, 242, 222, 0.56);
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.session-card:hover .session-card-delete {
+  opacity: 1;
+}
+
+.session-card-delete:hover {
+  color: #d9534f;
+}
+
+.session-card-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
 .session-card-meta {
   display: flex;
   align-items: center;
@@ -1169,6 +1200,79 @@ body {
   .chat-form {
     min-height: 54px;
   }
+}
+
+.delete-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.delete-confirm-dialog {
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid rgba(255, 232, 196, 0.16);
+  border-radius: 16px;
+  padding: 28px 32px;
+  max-width: 320px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+}
+
+.delete-confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text, #fff);
+  margin: 0 0 10px;
+}
+
+.delete-confirm-desc {
+  font-size: 13px;
+  color: rgba(255, 242, 222, 0.6);
+  margin: 0 0 24px;
+  line-height: 1.6;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.delete-confirm-cancel {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 232, 196, 0.2);
+  background: transparent;
+  color: rgba(255, 242, 222, 0.8);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.delete-confirm-cancel:hover {
+  background: rgba(255, 232, 196, 0.08);
+  border-color: rgba(255, 232, 196, 0.3);
+}
+
+.delete-confirm-confirm {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: none;
+  background: #d9534f;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.delete-confirm-confirm:hover {
+  background: #c9302c;
 }
 
 @media (prefers-reduced-motion: reduce) {

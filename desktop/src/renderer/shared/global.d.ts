@@ -89,6 +89,7 @@ interface ElectronAPI {
   fetchConversations: () => Promise<ConversationSummary[]>;
   fetchConversation: (threadId: string) => Promise<ConversationDetail>;
   createConversation: () => Promise<ConversationSummary>;
+  deleteConversation: (threadId: string) => Promise<{ status: string; thread_id: string }>;
   healthCheck: () => Promise<boolean>;
 }
 

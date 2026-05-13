@@ -454,6 +454,37 @@ export default function DialogApp() {
     window.localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, threadId);
   };
 
+  const handleDeleteConversation = async (threadId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const confirmed = window.confirm("确认删除这段对白？\n\n删除后无法恢复，所有消息记录都将消失。");
+    if (!confirmed) return;
+    await confirmDeleteConversation(threadId);
+  };
+
+  const confirmDeleteConversation = async (threadId: string) => {
+    if (!threadId || !isOnline) return;
+    const threadIdToDelete = threadId;
+
+    try {
+      await window.electronAPI.deleteConversation(threadIdToDelete);
+      const remaining = conversations.filter((item) => item.thread_id !== threadIdToDelete);
+      setConversations(remaining);
+      if (activeThreadId === threadIdToDelete) {
+        const next = remaining[0] ?? null;
+        threadIdRef.current = next?.thread_id ?? null;
+        setActiveThreadId(next?.thread_id ?? null);
+        setMessages([]);
+        if (next) {
+          window.localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, next.thread_id);
+        } else {
+          window.localStorage.removeItem(ACTIVE_THREAD_STORAGE_KEY);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+    }
+  };
+
   const handleCreateConversation = async () => {
     if (!isOnline || isStreaming) return;
 
@@ -733,7 +764,9 @@ export default function DialogApp() {
   return (
     <div className="dialog-shell">
       <div className="dialog-frame">
-        <div className="window-drag-zone" aria-hidden="true" />
+        {!isConversationSheetOpen ? (
+          <div className="window-drag-zone" aria-hidden="true" />
+        ) : null}
         <div className="background-figure" aria-hidden="true">
           <img src={roxyBackgroundPng} alt="" />
         </div>
@@ -851,18 +884,39 @@ export default function DialogApp() {
                   {conversations.map((conversation) => {
                     const isActive = conversation.thread_id === activeThreadId;
                     return (
-                      <button
+                      <div
                         key={conversation.thread_id}
-                        type="button"
+                        role="button"
+                        tabIndex={isStreaming ? -1 : 0}
                         className={`session-card${isActive ? " active" : ""}`}
-                        disabled={isStreaming}
                         onClick={() => {
+                          if (isStreaming) return;
                           void handleSelectConversation(conversation.thread_id);
                         }}
+                        onKeyDown={(event) => {
+                          if (isStreaming) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            void handleSelectConversation(conversation.thread_id);
+                          }
+                        }}
+                        aria-disabled={isStreaming}
                       >
                         <div className="session-card-top">
                           <p className="session-card-title">{getConversationTitle(conversation)}</p>
                           <span className="session-card-count">{conversation.message_count}</span>
+                          <button
+                            type="button"
+                            className="session-card-delete"
+                            aria-label={`Delete conversation ${getConversationTitle(conversation)}`}
+                            onClick={(event) => {
+                              void handleDeleteConversation(conversation.thread_id, event);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 6h18M8 6V4h8v2M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </button>
                         </div>
                         <p className="session-card-preview">
                           {conversation.last_message_preview?.trim() || "回到这段对白，继续写下下一句。"}
@@ -871,7 +925,7 @@ export default function DialogApp() {
                           <span>{formatRelativeTime(conversation.updated_at)}</span>
                           <span>{conversation.thread_id.slice(-6)}</span>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

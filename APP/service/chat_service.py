@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -111,6 +112,15 @@ class ChatService:
             conversation_path=thread_paths.conversation_file,
             messages_path=thread_paths.messages_file,
         )
+
+    def delete_conversation(self, thread_id: str) -> None:
+        resolved_thread_id = self._normalize_thread_id(thread_id)
+        if not resolved_thread_id:
+            raise ValueError("thread_id is required")
+        thread_paths = self._thread_runtime.resolve(resolved_thread_id)
+        thread_root = thread_paths.thread_root
+        if thread_root.is_dir():
+            shutil.rmtree(thread_root)
 
     async def run_chat(
         self,

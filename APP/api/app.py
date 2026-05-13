@@ -165,6 +165,16 @@ async def rename_conversation(thread_id: str, request: ConversationRenameRequest
     return ConversationSummary(**_summary_payload(summary))
 
 
+@router.post("/conversations/{thread_id}/delete", summary="Delete conversation")
+async def delete_conversation(thread_id: str) -> dict:
+    service = get_chat_service()
+    try:
+        service.delete_conversation(thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "deleted", "thread_id": thread_id}
+
+
 @router.get("/health", summary="Health check")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
