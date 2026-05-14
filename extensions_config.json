@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "github": {
-      "enabled": false,
+      "enabled": true,
       "type": "stdio",
       "command": "npx",
       "args": [
@@ -14,7 +14,7 @@
       "description": "GitHub MCP server for repository, issue, and pull request workflows."
     },
     "playwright": {
-      "enabled": false,
+      "enabled": true,
       "type": "stdio",
       "command": "npx",
       "args": [
