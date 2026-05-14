@@ -34,6 +34,18 @@ class FakeHarnessClient:
             ),
         )
         self.reminders = ReminderScheduler(sandbox_root / "reminders.json")
+        self.mcp_config = {
+            "mcp_servers": {
+                "github": {
+                    "enabled": False,
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"],
+                    "env": {"GITHUB_TOKEN": ""},
+                    "description": "GitHub MCP server",
+                }
+            }
+        }
 
     async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
         event_callback = kwargs.get("event_callback")
@@ -55,6 +67,13 @@ class FakeHarnessClient:
 
     def list_models(self) -> list[dict[str, object]]:
         return []
+
+    def get_mcp_config(self) -> dict[str, dict[str, object]]:
+        return self.mcp_config
+
+    def update_mcp_config(self, mcp_servers: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+        self.mcp_config = {"mcp_servers": mcp_servers}
+        return self.mcp_config
 
 
 def test_conversation_endpoints_work(tmp_path):
@@ -120,3 +139,31 @@ def test_reminder_endpoint_returns_detail(tmp_path):
     payload = response.json()
     assert payload["id"] == created.id
     assert payload["message"] == "Drink water"
+
+
+def test_mcp_config_endpoints_work(tmp_path):
+    service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
+    app_module._service = service
+    chat_service_module._service = service
+    client = TestClient(create_app())
+
+    get_response = client.get("/mcp/config")
+    assert get_response.status_code == 200
+    assert "github" in get_response.json()["mcp_servers"]
+
+    update_response = client.post(
+        "/mcp/config",
+        json={
+            "mcp_servers": {
+                "playwright": {
+                    "enabled": True,
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@playwright/mcp"],
+                    "description": "Playwright MCP server",
+                }
+            }
+        },
+    )
+    assert update_response.status_code == 200
+    assert "playwright" in update_response.json()["mcp_servers"]

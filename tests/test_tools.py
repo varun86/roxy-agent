@@ -5,11 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from harness.models.types import RuntimeContext, ToolCall
+from harness.mcp.tools import McpToolAdapter
 from harness.sandbox.runtime import BasicSandbox
 from harness.scheduler import ReminderScheduler
 from harness.tools.executor import ToolExecutor
 from harness.tools.local_browser import LocalBrowserClient
-from harness.tools.registry import ToolRegistry, ToolRuntime
+from harness.tools.registry import ToolRegistry, ToolRuntime, ToolSpec
 from harness.tools.web_search import WebSearchClient
 
 
@@ -225,3 +226,39 @@ def test_tool_schema_descriptions_emphasize_browser_and_reminder_triggers(tmp_pa
     assert "Never say a page has been opened unless this tool call actually succeeded." in browser_open
     assert "Examples:" in reminder
     assert "Never claim the reminder is scheduled unless this tool call actually succeeded." in reminder
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_extra_mcp_tools(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+
+    async def fake_mcp_tool(runtime: ToolRuntime, args: dict[str, object]) -> str:
+        return f"mcp:{args['query']}"
+
+    registry = ToolRegistry.with_default_tools(
+        sandbox,
+        extra_tools=[
+            McpToolAdapter(
+                spec=ToolSpec(
+                    name="github__search_repositories",
+                    description="Search repositories via GitHub MCP.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                ),
+                handler=fake_mcp_tool,
+            )
+        ],
+    )
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext()))
+
+    result = await executor.execute_tool_call(
+        ToolCall(id="12", name="github__search_repositories", arguments={"query": "deer-flow"})
+    )
+    tool_names = {item["function"]["name"] for item in registry.list_tool_schemas()}
+
+    assert "github__search_repositories" in tool_names
+    assert result.is_error is False
+    assert result.output == "mcp:deer-flow"

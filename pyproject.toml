@@ -10,6 +10,8 @@ dependencies = [
 	"python-dotenv>=1.0.0",
 	"dataclasses>=0.8",
 	"qdrant-client[fastembed]>=1.15.1",
+	"langchain-mcp-adapters>=0.1.0",
+	"mcp>=1.0.0",
 ]
 
 [dependency-groups]

@@ -1,17 +1,17 @@
 """DTO layer for request/response objects."""
 
-from APP.dto.chat import (
-    ChatRequest,
-    ChatResponse,
+from APP.dto.chat import ChatRequest, ChatResponse, TraceInfo
+from APP.dto.conversation import (
     ConversationCreateResponse,
     ConversationDetail,
     ConversationMessage,
     ConversationRenameRequest,
     ConversationSummary,
-    ModelInfo,
-    ReminderDetail,
-    TraceInfo,
+    ToolCallEventInfo,
 )
+from APP.dto.mcp import McpConfigResponse, McpConfigUpdateRequest, McpOAuthConfigPayload, McpServerConfigPayload
+from APP.dto.model import ModelInfo
+from APP.dto.reminder import ReminderDetail
 
 __all__ = [
     "ChatRequest",
@@ -21,7 +21,12 @@ __all__ = [
     "ConversationMessage",
     "ConversationRenameRequest",
     "ConversationSummary",
+    "McpConfigResponse",
+    "McpConfigUpdateRequest",
+    "McpOAuthConfigPayload",
+    "McpServerConfigPayload",
     "ModelInfo",
     "ReminderDetail",
     "TraceInfo",
+    "ToolCallEventInfo",
 ]

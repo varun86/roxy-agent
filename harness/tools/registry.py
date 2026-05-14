@@ -7,18 +7,14 @@ from typing import Any
 
 from harness.models.types import RuntimeContext
 from harness.sandbox.runtime import BasicSandbox
-from harness.subagents import (
-    MAX_CONCURRENT_SUBAGENTS,
-    SubagentExecutor,
-    SubagentResult,
-    SubagentStatus,
-    cleanup_background_task,
-    get_background_task_result,
-    get_subagent_config,
-)
+from harness.subagents import get_subagent_config
 from harness.rag.service import KnowledgeBaseService
 from harness.tools.local_browser import LocalBrowserClient
 from harness.tools.web_search import WebSearchClient
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from harness.mcp.tools import McpToolAdapter
 
 
 @dataclass(slots=True)
@@ -85,6 +81,7 @@ class ToolRegistry:
         local_browser_enabled: bool = True,
         knowledge_base: KnowledgeBaseService | None = None,
         include_task_tool: bool = False,
+        extra_tools: list["McpToolAdapter"] | None = None,
     ) -> "ToolRegistry":
         registry = cls()
         search_client = web_search_client or WebSearchClient()
@@ -406,5 +403,8 @@ class ToolRegistry:
                 ),
                 task_tool,
             )
+
+        for adapter in extra_tools or []:
+            registry.register(adapter.spec, adapter.handler)
 
         return registry

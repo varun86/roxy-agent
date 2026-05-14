@@ -39,7 +39,7 @@ def test_build_system_instructions_includes_skills_section_when_present():
     )
 
     instructions = build_system_instructions([skill])
-    assert "You are a local desktop assistant" in instructions
+    assert "You are a local desktop assistant embodied as a living character companion" in instructions
     assert "<available_skills>" in instructions
 
 
@@ -64,6 +64,13 @@ def test_build_system_instructions_includes_reminder_tool_governance():
     assert "<runtime_clock>" in instructions
     assert "When the user asks for a reminder, timer, alarm, countdown, wake-up, or later notification" in instructions
     assert "Never claim that a reminder has been scheduled unless create_reminder actually succeeded." in instructions
+
+
+def test_build_system_instructions_discourages_stage_directions_for_task_completion():
+    instructions = build_system_instructions([])
+
+    assert "Prefer no stage directions at all for routine task completion" in instructions
+    assert "When a task is finished, prefer a short in-character confirmation over a narrated scene." in instructions
 
 
 def test_build_system_instructions_preserves_pinned_skill_priority():

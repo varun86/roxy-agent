@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-import shutil
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from APP.service.chat.service import ChatDomainService
+from APP.service.conversation.service import ConversationService
+from APP.service.mcp.service import McpService
+from APP.service.model.service import ModelService
+from APP.service.reminder.service import ReminderService
+from APP.service.runtime.service import AppRuntimeService
 from harness.client import HarnessClient
-from harness.context import (
-    ConversationStore,
-    ConversationTrace,
-    ThreadContextStore,
-    ThreadRuntimeResolver,
-    ToolCallEvent,
-    generate_thread_id,
-)
 from harness.memory import get_memory_queue
 from harness.models.types import AgentRunResult
 from harness.scheduler import Reminder
@@ -22,143 +18,35 @@ from harness.scheduler import Reminder
 class ChatService:
     def __init__(self, client: HarnessClient | None = None) -> None:
         project_root = Path(__file__).resolve().parents[2]
-        self._client = client or HarnessClient(project_root=project_root)
-        runtime = self._client.config.runtime
-        self._context_store = ThreadContextStore(
-            max_recent_messages=runtime.max_recent_messages,
-            compact_threshold_chars=runtime.compact_threshold_chars,
-            skill_memory_max=runtime.skill_memory_max,
-        )
-        self._conversation_store = ConversationStore()
-        self._thread_runtime = ThreadRuntimeResolver(self._client.config.sandbox.root_dir)
-        self._thread_locks: dict[str, asyncio.Lock] = {}
-
-    def _normalize_thread_id(self, thread_id: str | None = None) -> str | None:
-        if thread_id and thread_id.strip():
-            return thread_id.strip()
-        return None
-
-    def _resolve_or_create_thread_id(self, thread_id: str | None = None) -> str:
-        return self._normalize_thread_id(thread_id) or generate_thread_id()
-
-    def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
-        lock = self._thread_locks.get(thread_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._thread_locks[thread_id] = lock
-        return lock
-
-    def _build_history(
-        self,
-        resolved_thread_id: str,
-        *,
-        messages: list[dict[str, str]] | None,
-    ) -> list[dict[str, str]]:
-        thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
-        detail = self._conversation_store.load_conversation(
-            resolved_thread_id,
-            conversation_path=thread_paths.conversation_file,
-            messages_path=thread_paths.messages_file,
-        )
-        conversation_history = self._conversation_store.build_history_messages(
-            detail,
-            max_messages=self._client.config.runtime.max_recent_messages,
-        )
-        if conversation_history:
-            return conversation_history
-
-        context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
-        return self._context_store.build_history(context, messages)
-
-    def _queue_memory_update(
-        self,
-        *,
-        thread_id: str,
-        user_message: str,
-        assistant_message: str,
-        history: list[dict[str, str]],
-    ) -> None:
-        payload = [*history, {"role": "user", "content": user_message}, {"role": "assistant", "content": assistant_message}]
-        try:
-            queue = get_memory_queue(self._client.config)
-            queue.add(thread_id=thread_id, messages=payload)
-        except Exception:
-            return
-
-    @staticmethod
-    def _build_trace_info(result: AgentRunResult) -> ConversationTrace:
-        return ConversationTrace(
-            steps=result.trace.steps,
-            tool_calls=result.trace.tool_calls,
-            errors=result.trace.errors,
-            subagent_calls=result.trace.subagent_calls,
-            subagent_errors=result.trace.subagent_errors,
-        )
-
-    @staticmethod
-    def _build_tool_event(event: dict[str, object]) -> ToolCallEvent | None:
-        if event.get("type") != "tool_called":
-            return None
-        call_id = event.get("call_id")
-        tool_name = event.get("tool_name")
-        arguments = event.get("arguments")
-        output = event.get("output")
-        if not isinstance(call_id, str) or not call_id:
-            return None
-        if not isinstance(tool_name, str) or not tool_name:
-            return None
-        return ToolCallEvent(
-            call_id=call_id,
-            tool_name=tool_name,
-            arguments=arguments if isinstance(arguments, dict) else {},
-            output=output if isinstance(output, str) else "",
-            is_error=bool(event.get("is_error")),
-        )
+        harness_client = client or HarnessClient(project_root=project_root)
+        self._runtime = AppRuntimeService(harness_client, memory_queue_getter=lambda config: get_memory_queue(config))
+        self._chat = ChatDomainService(self._runtime)
+        self._conversation = ConversationService(self._runtime)
+        self._mcp = McpService(harness_client)
+        self._model = ModelService(harness_client)
+        self._reminder = ReminderService(harness_client.reminders)
+        self._client = harness_client
 
     def create_conversation(self, thread_id: str | None = None) -> Any:
-        resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
-        thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
-        detail = self._conversation_store.ensure_conversation(
-            resolved_thread_id,
-            conversation_path=thread_paths.conversation_file,
-            messages_path=thread_paths.messages_file,
-        )
-        return detail.summary
+        return self._conversation.create_conversation(thread_id)
 
     def list_conversations(self) -> list[Any]:
-        return self._conversation_store.list_conversations(self._thread_runtime.sandbox_root / "threads")
+        return self._conversation.list_conversations()
+
+    def get_mcp_config(self) -> dict[str, dict[str, object]]:
+        return self._mcp.get_mcp_config()
+
+    def update_mcp_config(self, mcp_servers: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+        return self._mcp.update_mcp_config(mcp_servers)
 
     def get_conversation(self, thread_id: str) -> Any | None:
-        resolved_thread_id = self._normalize_thread_id(thread_id)
-        if not resolved_thread_id:
-            return None
-        thread_paths = self._thread_runtime.resolve(resolved_thread_id)
-        return self._conversation_store.load_conversation(
-            resolved_thread_id,
-            conversation_path=thread_paths.conversation_file,
-            messages_path=thread_paths.messages_file,
-        )
+        return self._conversation.get_conversation(thread_id)
 
     def rename_conversation(self, thread_id: str, title: str) -> Any:
-        resolved_thread_id = self._normalize_thread_id(thread_id)
-        if not resolved_thread_id:
-            raise ValueError("thread_id is required")
-        thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
-        return self._conversation_store.rename_conversation(
-            resolved_thread_id,
-            title,
-            conversation_path=thread_paths.conversation_file,
-            messages_path=thread_paths.messages_file,
-        )
+        return self._conversation.rename_conversation(thread_id, title)
 
     def delete_conversation(self, thread_id: str) -> None:
-        resolved_thread_id = self._normalize_thread_id(thread_id)
-        if not resolved_thread_id:
-            raise ValueError("thread_id is required")
-        thread_paths = self._thread_runtime.resolve(resolved_thread_id)
-        thread_root = thread_paths.thread_root
-        if thread_root.is_dir():
-            shutil.rmtree(thread_root)
+        self._conversation.delete_conversation(thread_id)
 
     async def run_chat(
         self,
@@ -168,61 +56,7 @@ class ChatService:
         thread_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> AgentRunResult:
-        resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
-        lock = self._get_thread_lock(resolved_thread_id)
-        async with lock:
-            thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
-            self._conversation_store.ensure_conversation(
-                resolved_thread_id,
-                conversation_path=thread_paths.conversation_file,
-                messages_path=thread_paths.messages_file,
-            )
-            context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
-            history = self._build_history(resolved_thread_id, messages=messages)
-
-            tool_events: list[ToolCallEvent] = []
-
-            async def on_event(event: dict[str, object]) -> None:
-                tool_event = self._build_tool_event(event)
-                if tool_event is not None:
-                    tool_events.append(tool_event)
-
-            result = await self._client.run_async(
-                message,
-                model,
-                conversation_history=history,
-                thread_id=resolved_thread_id,
-                thread_paths=thread_paths,
-                pinned_skills=context.pinned_skills,
-                compact_summary=context.compact_summary,
-                event_callback=on_event,
-            )
-
-            self._context_store.update_after_turn(
-                context,
-                user_message=message,
-                assistant_message=result.text,
-                incoming_messages=messages,
-                available_skill_names=self._client.list_enabled_skill_names(),
-                context_path=thread_paths.context_file,
-            )
-            self._conversation_store.append_turn(
-                resolved_thread_id,
-                user_message=message,
-                assistant_message=result.text,
-                assistant_tool_events=tool_events,
-                assistant_trace=self._build_trace_info(result),
-                conversation_path=thread_paths.conversation_file,
-                messages_path=thread_paths.messages_file,
-            )
-            self._queue_memory_update(
-                thread_id=resolved_thread_id,
-                user_message=message,
-                assistant_message=result.text,
-                history=history,
-            )
-            result.thread_id = resolved_thread_id
-            return result
+        return await self._chat.run_chat(message, model, thread_id=thread_id, messages=messages)
 
     async def run_chat_stream(
         self,
@@ -232,105 +66,20 @@ class ChatService:
         thread_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[dict[str, object]]:
-        yield {"type": "start"}
-
-        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
-        tool_events: list[ToolCallEvent] = []
-
-        async def on_text_delta(delta: str) -> None:
-            await queue.put({"type": "delta", "delta": delta})
-
-        async def on_event(event: dict[str, object]) -> None:
-            tool_event = self._build_tool_event(event)
-            if tool_event is not None:
-                tool_events.append(tool_event)
-            await queue.put(event)
-
-        resolved_thread_id = self._resolve_or_create_thread_id(thread_id)
-        lock = self._get_thread_lock(resolved_thread_id)
-        async with lock:
-            thread_paths = self._thread_runtime.ensure_dirs(self._thread_runtime.resolve(resolved_thread_id))
-            self._conversation_store.ensure_conversation(
-                resolved_thread_id,
-                conversation_path=thread_paths.conversation_file,
-                messages_path=thread_paths.messages_file,
-            )
-            context = self._context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
-            history = self._build_history(resolved_thread_id, messages=messages)
-            task = asyncio.create_task(
-                self._client.run_async(
-                    message,
-                    model,
-                    on_text_delta=on_text_delta,
-                    conversation_history=history,
-                    thread_id=resolved_thread_id,
-                    thread_paths=thread_paths,
-                    pinned_skills=context.pinned_skills,
-                    compact_summary=context.compact_summary,
-                    event_callback=on_event,
-                )
-            )
-
-            while True:
-                if task.done() and queue.empty():
-                    break
-
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
-                    yield event
-                except TimeoutError:
-                    continue
-
-            result = await task
-            self._context_store.update_after_turn(
-                context,
-                user_message=message,
-                assistant_message=result.text,
-                incoming_messages=messages,
-                available_skill_names=self._client.list_enabled_skill_names(),
-                context_path=thread_paths.context_file,
-            )
-            self._conversation_store.append_turn(
-                resolved_thread_id,
-                user_message=message,
-                assistant_message=result.text,
-                assistant_tool_events=tool_events,
-                assistant_trace=self._build_trace_info(result),
-                conversation_path=thread_paths.conversation_file,
-                messages_path=thread_paths.messages_file,
-            )
-            self._queue_memory_update(
-                thread_id=resolved_thread_id,
-                user_message=message,
-                assistant_message=result.text,
-                history=history,
-            )
-            result.thread_id = resolved_thread_id
-
-        yield {
-            "type": "done",
-            "text": result.text,
-            "trace": {
-                "steps": result.trace.steps,
-                "tool_calls": result.trace.tool_calls,
-                "errors": result.trace.errors,
-                "subagent_calls": result.trace.subagent_calls,
-                "subagent_errors": result.trace.subagent_errors,
-            },
-            "thread_id": resolved_thread_id,
-        }
+        async for event in self._chat.run_chat_stream(message, model, thread_id=thread_id, messages=messages):
+            yield event
 
     def list_models(self) -> list[dict[str, Any]]:
-        return self._client.list_models()
+        return self._model.list_models()
 
     async def start_reminders(self) -> None:
-        await self._client.reminders.start()
+        await self._reminder.start()
 
     async def stop_reminders(self) -> None:
-        await self._client.reminders.stop()
+        await self._reminder.stop()
 
     async def get_reminder(self, reminder_id: str) -> Reminder | None:
-        return await self._client.reminders.get_reminder(reminder_id)
+        return await self._reminder.get_reminder(reminder_id)
 
 
 _service: ChatService | None = None

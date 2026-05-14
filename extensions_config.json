@@ -1,4 +1,29 @@
 {
+  "mcpServers": {
+    "github": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      },
+      "description": "GitHub MCP server for repository, issue, and pull request workflows."
+    },
+    "playwright": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ],
+      "description": "Playwright MCP server for browser automation and page interaction."
+    }
+  },
   "skills": {
     "example-skill": {
       "enabled": true
