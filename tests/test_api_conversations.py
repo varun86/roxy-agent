@@ -6,9 +6,11 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import APP.api.app as app_module
+import APP.service.chat_service as chat_service_module
 from APP.api.app import create_app
 from APP.service.chat_service import ChatService
-from harness.models.types import AgentRunResult
+from harness.models.types import AgentRunResult, AgentTrace
+from harness.scheduler import ReminderScheduler
 
 
 class FakeHarnessClient:
@@ -31,9 +33,34 @@ class FakeHarnessClient:
                 max_injection_tokens=1200,
             ),
         )
+        self.reminders = ReminderScheduler(sandbox_root / "reminders.json")
+        self.mcp_config = {
+            "mcp_servers": {
+                "github": {
+                    "enabled": False,
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"],
+                    "env": {"GITHUB_TOKEN": ""},
+                    "description": "GitHub MCP server",
+                }
+            }
+        }
 
     async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
-        return AgentRunResult(text=f"reply:{prompt}")
+        event_callback = kwargs.get("event_callback")
+        if event_callback is not None:
+            await event_callback(
+                {
+                    "type": "tool_called",
+                    "call_id": "call-1",
+                    "tool_name": "read_file",
+                    "arguments": {"path": "README.md"},
+                    "output": "hello",
+                    "is_error": False,
+                }
+            )
+        return AgentRunResult(text=f"reply:{prompt}", trace=AgentTrace(steps=2, tool_calls=1))
 
     def list_enabled_skill_names(self) -> list[str]:
         return ["example"]
@@ -41,10 +68,18 @@ class FakeHarnessClient:
     def list_models(self) -> list[dict[str, object]]:
         return []
 
+    def get_mcp_config(self) -> dict[str, dict[str, object]]:
+        return self.mcp_config
+
+    def update_mcp_config(self, mcp_servers: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+        self.mcp_config = {"mcp_servers": mcp_servers}
+        return self.mcp_config
+
 
 def test_conversation_endpoints_work(tmp_path):
     service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
     app_module._service = service
+    chat_service_module._service = service
     client = TestClient(create_app())
     fake_queue = SimpleNamespace(add=lambda **kwargs: None)
 
@@ -67,6 +102,8 @@ def test_conversation_endpoints_work(tmp_path):
         assert detail_response.status_code == 200
         detail = detail_response.json()
         assert detail["messages"][0]["content"] == "hello"
+        assert detail["messages"][1]["tool_events"][0]["tool_name"] == "read_file"
+        assert detail["messages"][1]["trace"]["tool_calls"] == 1
 
         rename_response = client.post(
             f"/conversations/{thread_id}/rename",
@@ -74,3 +111,59 @@ def test_conversation_endpoints_work(tmp_path):
         )
         assert rename_response.status_code == 200
         assert rename_response.json()["title"] == "Renamed"
+
+
+def test_reminder_endpoint_returns_detail(tmp_path):
+    service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
+    app_module._service = service
+    chat_service_module._service = service
+    client = TestClient(create_app())
+    reminder = client.post("/chat", json={"message": "noop", "thread_id": "thread-a"})
+    assert reminder.status_code == 200
+
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    created = asyncio.run(
+        service._client.reminders.create_reminder(
+            title="Hydrate",
+            message="Drink water",
+            trigger_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            thread_id="thread-a",
+        )
+    )
+
+    response = client.get(f"/reminders/{created.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == created.id
+    assert payload["message"] == "Drink water"
+
+
+def test_mcp_config_endpoints_work(tmp_path):
+    service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
+    app_module._service = service
+    chat_service_module._service = service
+    client = TestClient(create_app())
+
+    get_response = client.get("/mcp/config")
+    assert get_response.status_code == 200
+    assert "github" in get_response.json()["mcp_servers"]
+
+    update_response = client.post(
+        "/mcp/config",
+        json={
+            "mcp_servers": {
+                "playwright": {
+                    "enabled": True,
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@playwright/mcp"],
+                    "description": "Playwright MCP server",
+                }
+            }
+        },
+    )
+    assert update_response.status_code == 200
+    assert "playwright" in update_response.json()["mcp_servers"]

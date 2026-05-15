@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from harness.rag.service import KnowledgeBaseService
+    from harness.scheduler import ReminderScheduler
 
 
 @dataclass(slots=True)
@@ -49,6 +50,8 @@ class AgentEvent:
         "task_completed",
         "task_failed",
         "task_timed_out",
+        "tool_called",
+        "reminder_created",
         "done",
         "error",
     ]
@@ -90,6 +93,7 @@ class RuntimeContext:
     max_subagents: int = 3
     subagent_timeout_seconds: int = 900
     knowledge_base: KnowledgeBaseService | None = None
+    reminders: ReminderScheduler | None = None
 
 
 ConversationInput = list[dict[str, Any]]

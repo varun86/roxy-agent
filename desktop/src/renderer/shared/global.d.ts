@@ -12,6 +12,15 @@ type ChatStreamEvent =
       is_error?: boolean;
     }
   | {
+      type: "reminder_created";
+      reminder_id?: string;
+      thread_id?: string | null;
+      title?: string;
+      message?: string;
+      trigger_at?: string;
+      timezone?: string;
+    }
+  | {
       type: "done";
       text?: string;
       thread_id?: string;
@@ -40,6 +49,21 @@ type ConversationDetail = ConversationSummary & {
     role: "user" | "assistant";
     content: string;
     created_at: string;
+    is_error?: boolean;
+    tool_events?: Array<{
+      call_id: string;
+      tool_name: string;
+      arguments: Record<string, unknown>;
+      output: string;
+      is_error?: boolean;
+    }>;
+    trace?: {
+      steps: number;
+      tool_calls: number;
+      errors: number;
+      subagent_calls?: number;
+      subagent_errors?: number;
+    } | null;
   }>;
 };
 
@@ -52,6 +76,24 @@ type RandomActionPayload = {
   key: string;
   url: string;
   label: string;
+};
+
+type ReminderDetail = {
+  id: string;
+  thread_id?: string | null;
+  title: string;
+  message: string;
+  trigger_at: string;
+  timezone: string;
+  status: string;
+  created_at: string;
+  fired_at?: string | null;
+  delivery_error?: string | null;
+};
+
+type ReminderOpenPayload = {
+  reminderId: string;
+  threadId?: string | null;
 };
 
 interface ElectronAPI {
@@ -75,6 +117,7 @@ interface ElectronAPI {
   onPlayRandomAction: (
     callback: (actionKey: string, assetUrl: string) => void
   ) => () => void;
+  onOpenReminderCard: (callback: (payload: ReminderOpenPayload) => void) => () => void;
   sendChatStream: (
     message: string,
     threadId?: string,
@@ -88,7 +131,9 @@ interface ElectronAPI {
   listModels: () => Promise<unknown>;
   fetchConversations: () => Promise<ConversationSummary[]>;
   fetchConversation: (threadId: string) => Promise<ConversationDetail>;
+  fetchReminder: (reminderId: string) => Promise<ReminderDetail>;
   createConversation: () => Promise<ConversationSummary>;
+  deleteConversation: (threadId: string) => Promise<{ status: string; thread_id: string }>;
   healthCheck: () => Promise<boolean>;
 }
 

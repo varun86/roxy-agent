@@ -217,6 +217,7 @@ body {
   padding: 44px 12px 16px 8px;
   background: rgba(4, 7, 18, 0.22);
   backdrop-filter: blur(6px);
+  border-radius: 26px;
 }
 
 .session-sheet.visible {
@@ -349,7 +350,38 @@ body {
   animation: shimmer 1.6s infinite linear;
 }
 
-.session-card-top,
+.session-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.session-card-delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: rgba(255, 242, 222, 0.56);
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.session-card:hover .session-card-delete {
+  opacity: 1;
+}
+
+.session-card-delete:hover {
+  color: #d9534f;
+}
+
+.session-card-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
 .session-card-meta {
   display: flex;
   align-items: center;
@@ -572,7 +604,8 @@ body {
 
 .typing-indicator.hidden,
 .trace-info.hidden,
-.turn-overlay[aria-hidden="true"] {
+.turn-overlay[aria-hidden="true"],
+.reminder-overlay[aria-hidden="true"] {
   display: none;
 }
 
@@ -711,6 +744,7 @@ body {
   padding: 44px 12px 16px 8px;
   background: rgba(4, 7, 18, 0.22);
   backdrop-filter: blur(6px);
+  border-radius: 26px;
 }
 
 .turn-overlay::-webkit-scrollbar {
@@ -1084,6 +1118,170 @@ body {
   word-break: break-word;
 }
 
+.reminder-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 20px;
+  background: rgba(4, 7, 18, 0.18);
+  backdrop-filter: blur(10px) saturate(1.08);
+  border-radius: 26px;
+  animation: reminder-card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.reminder-card {
+  width: 252px;
+  max-width: 100%;
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.055)),
+    rgba(15, 19, 36, 0.72);
+  box-shadow:
+    0 18px 42px rgba(3, 5, 14, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(22px) saturate(1.2);
+  padding: 14px;
+}
+
+.reminder-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reminder-kicker {
+  color: rgba(255, 242, 222, 0.58);
+  font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.reminder-card h2 {
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.32;
+  letter-spacing: 0;
+}
+
+.reminder-status {
+  position: relative;
+  flex-shrink: 0;
+  color: rgba(220, 255, 242, 0.9);
+  padding-left: 11px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.reminder-status::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.42em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(159, 240, 203, 0.95);
+  box-shadow: 0 0 12px rgba(159, 240, 203, 0.46);
+}
+
+.reminder-status.loading {
+  color: rgba(225, 232, 255, 0.95);
+}
+
+.reminder-status.loading::before {
+  background: rgba(138, 164, 255, 0.95);
+  box-shadow: 0 0 12px rgba(138, 164, 255, 0.46);
+}
+
+.reminder-message {
+  margin-top: 13px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reminder-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.reminder-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.reminder-meta-row + .reminder-meta-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.reminder-meta-row dt {
+  color: rgba(255, 242, 222, 0.48);
+  font-size: 10px;
+}
+
+.reminder-meta-row dd {
+  color: rgba(255, 242, 222, 0.82);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: right;
+  word-break: break-word;
+}
+
+.reminder-actions {
+  display: flex;
+  justify-content: stretch;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.reminder-primary,
+.reminder-secondary {
+  flex: 1;
+  min-height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.reminder-primary {
+  background: rgba(245, 245, 247, 0.92);
+  color: rgba(20, 23, 34, 0.94);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.reminder-secondary {
+  background: rgba(255, 255, 255, 0.065);
+  color: rgba(255, 242, 222, 0.86);
+}
+
+.reminder-primary:hover,
+.reminder-secondary:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1122,6 +1320,18 @@ body {
   }
 }
 
+@keyframes reminder-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes shimmer {
   from {
     background-position: -160px 0;
@@ -1153,7 +1363,8 @@ body {
   .system-bubble,
   .chat-form,
   .turn-overlay-content,
-  .detail-bubble {
+  .detail-bubble,
+  .reminder-card {
     width: 100%;
     max-width: 100%;
   }
@@ -1169,6 +1380,79 @@ body {
   .chat-form {
     min-height: 54px;
   }
+}
+
+.delete-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.delete-confirm-dialog {
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid rgba(255, 232, 196, 0.16);
+  border-radius: 16px;
+  padding: 28px 32px;
+  max-width: 320px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+}
+
+.delete-confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text, #fff);
+  margin: 0 0 10px;
+}
+
+.delete-confirm-desc {
+  font-size: 13px;
+  color: rgba(255, 242, 222, 0.6);
+  margin: 0 0 24px;
+  line-height: 1.6;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.delete-confirm-cancel {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 232, 196, 0.2);
+  background: transparent;
+  color: rgba(255, 242, 222, 0.8);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.delete-confirm-cancel:hover {
+  background: rgba(255, 232, 196, 0.08);
+  border-color: rgba(255, 232, 196, 0.3);
+}
+
+.delete-confirm-confirm {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: none;
+  background: #d9534f;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.delete-confirm-confirm:hover {
+  background: #c9302c;
 }
 
 @media (prefers-reduced-motion: reduce) {

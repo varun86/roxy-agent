@@ -21,6 +21,27 @@ class ConversationMessage:
     role: str
     content: str
     created_at: str
+    is_error: bool = False
+    tool_events: list["ToolCallEvent"] = field(default_factory=list)
+    trace: "ConversationTrace | None" = None
+
+
+@dataclass(slots=True)
+class ToolCallEvent:
+    call_id: str
+    tool_name: str
+    arguments: dict[str, object]
+    output: str
+    is_error: bool = False
+
+
+@dataclass(slots=True)
+class ConversationTrace:
+    steps: int
+    tool_calls: int
+    errors: int
+    subagent_calls: int = 0
+    subagent_errors: int = 0
 
 
 @dataclass(slots=True)
@@ -122,6 +143,9 @@ class ConversationStore:
         *,
         user_message: str,
         assistant_message: str,
+        assistant_is_error: bool = False,
+        assistant_tool_events: list[ToolCallEvent] | None = None,
+        assistant_trace: ConversationTrace | None = None,
         conversation_path: Path,
         messages_path: Path,
     ) -> ConversationDetail:
@@ -145,6 +169,9 @@ class ConversationStore:
                     role="assistant",
                     content=assistant_message.strip(),
                     created_at=now,
+                    is_error=assistant_is_error,
+                    tool_events=list(assistant_tool_events or []),
+                    trace=assistant_trace,
                 ),
             ]
         )
@@ -260,12 +287,67 @@ class ConversationStore:
                 continue
             if not isinstance(content, str) or not content.strip():
                 continue
+            trace = ConversationStore._parse_trace(item.get("trace"))
+            tool_events = ConversationStore._parse_tool_events(item.get("tool_events"))
             messages.append(
                 ConversationMessage(
                     id=message_id if isinstance(message_id, str) and message_id else f"msg-{uuid.uuid4()}",
                     role=role,
                     content=content.strip(),
                     created_at=created_at if isinstance(created_at, str) and created_at else utc_now_iso(),
+                    is_error=bool(item.get("is_error")),
+                    tool_events=tool_events,
+                    trace=trace,
                 )
             )
         return messages
+
+    @staticmethod
+    def _parse_tool_events(data: object | None) -> list[ToolCallEvent]:
+        if not isinstance(data, list):
+            return []
+        events: list[ToolCallEvent] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            call_id = item.get("call_id")
+            tool_name = item.get("tool_name")
+            output = item.get("output")
+            arguments = item.get("arguments")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            if not isinstance(tool_name, str) or not tool_name:
+                continue
+            if not isinstance(output, str):
+                output = ""
+            if not isinstance(arguments, dict):
+                arguments = {}
+            events.append(
+                ToolCallEvent(
+                    call_id=call_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    output=output,
+                    is_error=bool(item.get("is_error")),
+                )
+            )
+        return events
+
+    @staticmethod
+    def _parse_trace(data: object | None) -> ConversationTrace | None:
+        if not isinstance(data, dict):
+            return None
+        steps = data.get("steps")
+        tool_calls = data.get("tool_calls")
+        errors = data.get("errors")
+        if not isinstance(steps, int) or not isinstance(tool_calls, int) or not isinstance(errors, int):
+            return None
+        subagent_calls = data.get("subagent_calls")
+        subagent_errors = data.get("subagent_errors")
+        return ConversationTrace(
+            steps=steps,
+            tool_calls=tool_calls,
+            errors=errors,
+            subagent_calls=subagent_calls if isinstance(subagent_calls, int) else 0,
+            subagent_errors=subagent_errors if isinstance(subagent_errors, int) else 0,
+        )

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, screen } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
@@ -17,6 +17,22 @@ const HIT_PADDING = 10;
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const TASK_SEQUENCE_MS = 3200;
 const DRAG_SLEEP_MS = 5 * 60 * 1000;
+const PET_EDGE_MARGIN = 0;
+
+const PET_LAYOUT = {
+    visibleArea: {
+        left: 0.18,
+        top: 0.02,
+        width: 0.64,
+        height: 0.96,
+    },
+    hitArea: {
+        left: 0.27,
+        top: 0.08,
+        width: 0.46,
+        height: 0.84,
+    },
+};
 
 const STATE_TO_SVG = {
     thinking: 'roxy-thinking.svg',
@@ -147,6 +163,8 @@ const VOICE_CLIP_FILES = {
     success_heavy_b: 'success_heavy_b.wav',
     partial_issue_a: 'partial_issue_a.wav',
     hard_failure_a: 'hard_failure_a.wav',
+    reminder_due_a: 'reminder_due_a.wav',
+    reminder_start_simple_a: 'reminder_start_simple_a.wav',
 };
 
 const EXTERNAL_COMPLETION_EVENTS = {
@@ -185,6 +203,7 @@ let hasPlayedIntroVoice = false;
 const externalSessions = new Map();
 const voiceRotationState = new Map();
 const externalCompletionCooldown = new Map();
+const pendingReminderCards = [];
 
 function getSvgAssetPath(fileName) {
     return path.join(__dirname, '..', '..', 'assets', 'roxy', fileName);
@@ -295,7 +314,7 @@ function handlePetInteraction(interactionType) {
     if (interactionType === 'double') {
         createDialogWindow();
         if (hasPlayedIntroVoice) {
-            emitVoiceKey('dialog_open_a');
+            emitVoiceKey(selectRandomVoiceKey(['dialog_open_a', 'reminder_start_simple_a']));
             return;
         }
         hasPlayedIntroVoice = true;
@@ -393,11 +412,62 @@ function exitChatMode() {
     syncLinkedWindows();
 }
 
+function resolvePetRect(area) {
+    return {
+        x: Math.round(PET_CONFIG.width * area.left),
+        y: Math.round(PET_CONFIG.height * area.top),
+        width: Math.round(PET_CONFIG.width * area.width),
+        height: Math.round(PET_CONFIG.height * area.height),
+    };
+}
+
+function getPetVisibleRect() {
+    return resolvePetRect(PET_LAYOUT.visibleArea);
+}
+
+function getPetHitRect() {
+    return resolvePetRect(PET_LAYOUT.hitArea);
+}
+
+function getPetVisibleBounds(petBounds) {
+    const rect = getPetVisibleRect();
+    return {
+        x: petBounds.x + rect.x,
+        y: petBounds.y + rect.y,
+        width: rect.width,
+        height: rect.height,
+    };
+}
+
+function getHitWindowBounds(petBounds) {
+    const rect = getPetHitRect();
+    return {
+        x: petBounds.x + rect.x,
+        y: petBounds.y + rect.y,
+        width: rect.width,
+        height: rect.height,
+    };
+}
+
 function clampToDisplay(bounds, display) {
     const area = display.workArea;
     return {
-        x: Math.max(area.x + 10, Math.min(bounds.x, area.x + area.width - bounds.width - 10)),
-        y: Math.max(area.y + 10, Math.min(bounds.y, area.y + area.height - bounds.height - 10)),
+        x: Math.max(area.x + PET_EDGE_MARGIN, Math.min(bounds.x, area.x + area.width - bounds.width - PET_EDGE_MARGIN)),
+        y: Math.max(area.y + PET_EDGE_MARGIN, Math.min(bounds.y, area.y + area.height - bounds.height - PET_EDGE_MARGIN)),
+    };
+}
+
+function clampPetWindowToDisplay(bounds, display) {
+    const area = display.workArea;
+    const visible = getPetVisibleRect();
+    const minX = area.x + PET_EDGE_MARGIN - visible.x;
+    const maxX = area.x + area.width - PET_EDGE_MARGIN - visible.x - visible.width;
+    const minY = area.y + PET_EDGE_MARGIN - visible.y;
+    const maxY = area.y + area.height - PET_EDGE_MARGIN - visible.y - visible.height;
+
+    return {
+        x: Math.max(Math.min(minX, maxX), Math.min(bounds.x, Math.max(minX, maxX))),
+        y: Math.max(Math.min(minY, maxY), Math.min(bounds.y, Math.max(minY, maxY))),
     };
 }
 
@@ -414,9 +484,10 @@ function getDialogAnchorBounds() {
     }
 
     const petBounds = petWindow.getBounds();
+    const visibleBounds = getPetVisibleBounds(petBounds);
     const preferred = {
-        x: petBounds.x + petBounds.width - 36,
-        y: petBounds.y - 18,
+        x: visibleBounds.x + visibleBounds.width - 36,
+        y: visibleBounds.y - 18,
         width: DIALOG_CONFIG.width,
         height: DIALOG_CONFIG.height,
     };
@@ -427,12 +498,7 @@ function getDialogAnchorBounds() {
 function syncLinkedWindows() {
     if (!petWindow || petWindow.isDestroyed() || !hitWindow || hitWindow.isDestroyed()) return;
     const petBounds = petWindow.getBounds();
-    hitWindow.setBounds({
-        x: petBounds.x,
-        y: petBounds.y,
-        width: PET_CONFIG.width,
-        height: PET_CONFIG.height,
-    });
+    hitWindow.setBounds(getHitWindowBounds(petBounds));
 }
 
 function syncDialogWindowPosition() {
@@ -666,6 +732,24 @@ function startStateServer() {
             return;
         }
 
+        if (req.method === 'POST' && req.url === '/reminder') {
+            const chunks = [];
+            req.on('data', (chunk) => chunks.push(chunk));
+            req.on('end', () => {
+                try {
+                    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    handleReminderDue(payload);
+                    res.writeHead(204);
+                    res.end();
+                } catch (error) {
+                    log.warn('Failed to process /reminder payload:', error.message);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: false }));
+                }
+            });
+            return;
+        }
+
         if (req.method === 'GET' && req.url === '/state') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, state: currentPetState }));
@@ -788,14 +872,19 @@ function startCodexMonitor() {
 }
 
 function createPetWindow() {
-    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-    const initialX = width - PET_CONFIG.width - 40;
-    const initialY = height - PET_CONFIG.height - 40;
+    const display = screen.getPrimaryDisplay();
+    const visibleRect = getPetVisibleRect();
+    const initialBounds = clampPetWindowToDisplay({
+        x: display.workArea.x + display.workArea.width - visibleRect.x - visibleRect.width - 24,
+        y: display.workArea.y + display.workArea.height - visibleRect.y - visibleRect.height - 24,
+        width: PET_CONFIG.width,
+        height: PET_CONFIG.height,
+    }, display);
 
     petWindow = new BrowserWindow({
         ...PET_CONFIG,
-        x: initialX,
-        y: initialY,
+        x: initialBounds.x,
+        y: initialBounds.y,
     });
 
     petWindow.loadFile(resolveRendererEntry('pet.html'));
@@ -827,12 +916,14 @@ function createPetWindow() {
 function createHitWindow() {
     if (!petWindow) return;
     const petBounds = petWindow.getBounds();
+    const hitBounds = getHitWindowBounds(petBounds);
+    const hitRect = getPetHitRect();
 
     hitWindow = new BrowserWindow({
-        width: PET_CONFIG.width,
-        height: PET_CONFIG.height,
-        x: petBounds.x,
-        y: petBounds.y,
+        width: hitBounds.width,
+        height: hitBounds.height,
+        x: hitBounds.x,
+        y: hitBounds.y,
         transparent: true,
         frame: false,
         alwaysOnTop: true,
@@ -848,7 +939,12 @@ function createHitWindow() {
         },
     });
 
-    hitWindow.loadFile(path.join(__dirname, '..', 'renderer', 'pet', 'hit.html'));
+    hitWindow.loadFile(path.join(__dirname, '..', 'renderer', 'pet', 'hit.html'), {
+        query: {
+            width: String(hitRect.width),
+            height: String(hitRect.height),
+        },
+    });
     hitWindow.setIgnoreMouseEvents(false);
     if (isMac) {
         hitWindow.setFocusable(false);
@@ -867,6 +963,7 @@ function createDialogWindow() {
         dialogWindow.show();
         dialogWindow.focus();
         syncDialogWindowPosition();
+        flushPendingReminderCards();
         return;
     }
 
@@ -878,11 +975,15 @@ function createDialogWindow() {
     });
 
     dialogWindow.loadFile(resolveRendererEntry('dialog.html'));
+    dialogWindow.webContents.on('did-finish-load', () => {
+        flushPendingReminderCards();
+    });
     dialogWindow.once('ready-to-show', () => {
         enterChatMode();
         dialogWindow.showInactive();
         reapplyMacVisibility(dialogWindow, { mode: 'dialog' });
         dialogWindow.focus();
+        flushPendingReminderCards();
     });
     dialogWindow.on('blur', () => {
         syncDialogWindowPosition();
@@ -891,6 +992,48 @@ function createDialogWindow() {
         dialogWindow = null;
         exitChatMode();
     });
+}
+
+function flushPendingReminderCards() {
+    if (!dialogWindow || dialogWindow.isDestroyed() || dialogWindow.webContents.isLoading()) {
+        return;
+    }
+    while (pendingReminderCards.length > 0) {
+        dialogWindow.webContents.send('open-reminder-card', pendingReminderCards.shift());
+    }
+}
+
+function showSystemReminderNotification(payload) {
+    if (!Notification.isSupported()) {
+        return;
+    }
+    const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Roxy Reminder';
+    const body = typeof payload.message === 'string' && payload.message.trim() ? payload.message.trim() : 'Reminder is due.';
+    try {
+        new Notification({ title, body }).show();
+    } catch (error) {
+        log.warn(`Failed to show reminder notification: ${error.message}`);
+    }
+}
+
+function handleReminderDue(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return;
+    }
+    const reminderId = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : '';
+    if (!reminderId) {
+        return;
+    }
+    const reminderPayload = {
+        reminderId,
+        threadId: typeof payload.thread_id === 'string' ? payload.thread_id : null,
+    };
+    pendingReminderCards.push(reminderPayload);
+    createDialogWindow();
+    emitVoiceKey('reminder_due_a');
+    playRandomPetAction();
+    showSystemReminderNotification(payload);
+    flushPendingReminderCards();
 }
 
 ipcMain.on('drag-lock', (_event, locked) => {
@@ -922,7 +1065,7 @@ ipcMain.on('drag-move', () => {
         width: PET_CONFIG.width,
         height: PET_CONFIG.height,
     };
-    const clamped = clampToDisplay(nextBounds, display);
+    const clamped = clampPetWindowToDisplay(nextBounds, display);
     petWindow.setPosition(clamped.x, clamped.y);
     syncLinkedWindows();
     syncDialogWindowPosition();

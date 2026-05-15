@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('play-random-action', listener);
         return () => ipcRenderer.removeListener('play-random-action', listener);
     },
+    onOpenReminderCard: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+        ipcRenderer.on('open-reminder-card', listener);
+        return () => ipcRenderer.removeListener('open-reminder-card', listener);
+    },
     // Chat streaming - parsed in preload so the renderer never receives a raw Response object
     sendChatStream: async (message, threadId, messages) => {
         const response = await fetch(`${API_BASE_URL}/chat/stream`, {
@@ -132,8 +137,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return response.json();
     },
 
+    fetchReminder: async (reminderId) => {
+        const response = await fetch(`${API_BASE_URL}/reminders/${encodeURIComponent(reminderId)}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    },
+
     createConversation: async () => {
         const response = await fetch(`${API_BASE_URL}/conversations/create`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    },
+
+    deleteConversation: async (threadId) => {
+        const response = await fetch(`${API_BASE_URL}/conversations/${encodeURIComponent(threadId)}/delete`, {
             method: 'POST',
         });
         if (!response.ok) {

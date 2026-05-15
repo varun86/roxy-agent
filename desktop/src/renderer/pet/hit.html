@@ -18,38 +18,28 @@
             background: transparent;
         }
 
-        :root {
-            --hit-left: 27%;
-            --hit-top: 8%;
-            --hit-width: 46%;
-            --hit-height: 84%;
-        }
-
         #hit-area {
             position: absolute;
-            left: var(--hit-left);
-            top: var(--hit-top);
-            width: var(--hit-width);
-            height: var(--hit-height);
+            inset: 0;
             cursor: grab;
             background: rgba(255, 255, 255, 0.001);
             clip-path: polygon(
-                42% 1%,
-                58% 1%,
-                68% 7%,
-                74% 18%,
-                78% 34%,
-                80% 50%,
-                76% 72%,
-                69% 92%,
-                58% 100%,
-                42% 100%,
-                31% 92%,
-                24% 72%,
-                20% 50%,
-                22% 34%,
-                26% 18%,
-                32% 7%
+                32% 0%,
+                68% 0%,
+                82% 7%,
+                92% 18%,
+                100% 34%,
+                100% 52%,
+                92% 72%,
+                80% 92%,
+                62% 100%,
+                38% 100%,
+                20% 92%,
+                8% 72%,
+                0% 52%,
+                0% 34%,
+                8% 18%,
+                18% 7%
             );
         }
 
@@ -61,6 +51,16 @@
 <body>
     <div id="hit-area"></div>
     <script>
+        const query = new URLSearchParams(window.location.search);
+        const hitWidth = Number.parseInt(query.get('width') || '', 10);
+        const hitHeight = Number.parseInt(query.get('height') || '', 10);
+        if (Number.isFinite(hitWidth) && Number.isFinite(hitHeight)) {
+            document.documentElement.style.width = `${hitWidth}px`;
+            document.documentElement.style.height = `${hitHeight}px`;
+            document.body.style.width = `${hitWidth}px`;
+            document.body.style.height = `${hitHeight}px`;
+        }
+
         const hitArea = document.getElementById('hit-area');
         const DRAG_THRESHOLD = 4;
         const DOUBLE_CLICK_MS = 280;
