@@ -43,24 +43,24 @@ Roxy-Agent 内置了 **多段Roxy的AI语音**，由本地 GPT-SoVITS TTS 服务
 
 | 场景 | 日文 | 中文 | 播放 |
 |------|------|------|------|
-| 首次打开 | 初めまして私の名前はロキシーミグルディアと申します | 初次见面，我是洛琪希·米格迪亚 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/intro_first_open.wav" type="audio/wav"></audio> |
-| 对话打开 | お話なら、いつでも聞きます。どうぞ開いてください。 | 如果您有话想说，我随时都愿意倾听。请打开吧。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/dialog_open_a.wav" type="audio/wav"></audio> |
-| 单击-被打扰 | そんなにつつかないでください。私だって困ります。 | 别再戳我了。我也会为难的。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_bother_a.wav" type="audio/wav"></audio> |
-| 单击-偷懒 | ただ怠けたいだけなら、少し怒りますよ。 | 如果只是想偷懒的话，我可要生气了哦。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_lazy_a.wav" type="audio/wav"></audio> |
-| 单击-专注 | 集中してください。今はぼんやりしている場合ではありません。 | 请专心。现在可不是发呆的时候。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_focus_a.wav" type="audio/wav"></audio> |
-| 单击-喝水 | お水でも飲んでください。補給も訓練の一部です。 | 去喝点水吧。补充水分也是训练的一部分。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_hydrate_a.wav" type="audio/wav"></audio> |
-| 单击-帮助 | ロキシーはここにいます。何かお手伝いできることはありますか。 | 洛琪希在这里。有什么我能帮您的吗？ | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_help_a.wav" type="audio/wav"></audio> |
-| 单击-命令 | 指示をください。ただし、あまり無茶なお願いはお断りします。 | 请给我指示。但太过分的要求我可是会拒绝的。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_command_a.wav" type="audio/wav"></audio> |
-| 单击-法术玩笑 | 豪雷積層雲……なんて、冗談です。まだあれを使うほどではありません。 | 豪雷积层云……开玩笑的。还没到需要用那个的时候。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_spell_joke_a.wav" type="audio/wav"></audio> |
-| 单击-不需咏唱 | この程度のことなら、詠唱するまでもありません。 | 这种程度的事，根本用不着咏唱。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/single_click_no_chant_a.wav" type="audio/wav"></audio> |
-| 成功-轻松 A | 今回もお手伝いできました。 | 这次也能帮上忙了。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_light_a.wav" type="audio/wav"></audio> |
-| 成功-轻松 B | ひとまずうまくまとまりました。 | 暂且顺利完成了。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_light_b.wav" type="audio/wav"></audio> |
-| 成功-普通 A | 対応は無事に完了しました。ご確認ください。 | 处理已顺利完成。请确认一下。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_normal_a.wav" type="audio/wav"></audio> |
-| 成功-普通 B | 必要な作業は整いました。どうぞをご確認ください。 | 必要的作业已准备就绪。请过目。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_normal_b.wav" type="audio/wav"></audio> |
-| 成功-复杂 A | 少し込み入っていましたが、対応は完了しています。 | 虽然有些复杂，但处理已完成了。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_heavy_a.wav" type="audio/wav"></audio> |
-| 成功-复杂 B | いくつか手順を進めましたが、無事にまとまりました。 | 推进了几个步骤，但顺利完成了。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/success_heavy_b.wav" type="audio/wav"></audio> |
-| 部分问题 | 対応は進みましたが、いくつか確認事項が残っています。 | 处理已有进展，但还有几项待确认。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/partial_issue_a.wav" type="audio/wav"></audio> |
-| 严重失败 | 申し訳ありません今回はそのまま完了できませんでした。 | 非常抱歉。这次无法直接完成。 | <audio controls style="height:24px"><source src="desktop/assets/voice/ja/hard_failure_a.wav" type="audio/wav"></audio> |
+| 首次打开 | 初めまして私の名前はロキシーミグルディアと申します | 初次见面，我是洛琪希·米格迪亚 | [试听](desktop/assets/voice/ja/intro_first_open.wav) |
+| 对话打开 | お話なら、いつでも聞きます。どうぞ開いてください。 | 如果您有话想说，我随时都愿意倾听。请打开吧。 | [试听](desktop/assets/voice/ja/dialog_open_a.wav) |
+| 单击-被打扰 | そんなにつつかないでください。私だって困ります。 | 别再戳我了。我也会为难的。 | [试听](desktop/assets/voice/ja/single_click_bother_a.wav) |
+| 单击-偷懒 | ただ怠けたいだけなら、少し怒りますよ。 | 如果只是想偷懒的话，我可要生气了哦。 | [试听](desktop/assets/voice/ja/single_click_lazy_a.wav) |
+| 单击-专注 | 集中してください。今はぼんやりしている場合ではありません。 | 请专心。现在可不是发呆的时候。 | [试听](desktop/assets/voice/ja/single_click_focus_a.wav) |
+| 单击-喝水 | お水でも飲んでください。補給も訓練の一部です。 | 去喝点水吧。补充水分也是训练的一部分。 | [试听](desktop/assets/voice/ja/single_click_hydrate_a.wav) |
+| 单击-帮助 | ロキシーはここにいます。何かお手伝いできることはありますか。 | 洛琪希在这里。有什么我能帮您的吗？ | [试听](desktop/assets/voice/ja/single_click_help_a.wav) |
+| 单击-命令 | 指示をください。ただし、あまり無茶なお願いはお断りします。 | 请给我指示。但太过分的要求我可是会拒绝的。 | [试听](desktop/assets/voice/ja/single_click_command_a.wav) |
+| 单击-法术玩笑 | 豪雷積層雲……なんて、冗談です。まだあれを使うほどではありません。 | 豪雷积层云……开玩笑的。还没到需要用那个的时候。 | [试听](desktop/assets/voice/ja/single_click_spell_joke_a.wav) |
+| 单击-不需咏唱 | この程度のことなら、詠唱するまでもありません。 | 这种程度的事，根本用不着咏唱。 | [试听](desktop/assets/voice/ja/single_click_no_chant_a.wav) |
+| 成功-轻松 A | 今回もお手伝いできました。 | 这次也能帮上忙了。 | [试听](desktop/assets/voice/ja/success_light_a.wav) |
+| 成功-轻松 B | ひとまずうまくまとまりました。 | 暂且顺利完成了。 | [试听](desktop/assets/voice/ja/success_light_b.wav) |
+| 成功-普通 A | 対応は無事に完了しました。ご確認ください。 | 处理已顺利完成。请确认一下。 | [试听](desktop/assets/voice/ja/success_normal_a.wav) |
+| 成功-普通 B | 必要な作業は整いました。どうぞをご確認ください。 | 必要的作业已准备就绪。请过目。 | [试听](desktop/assets/voice/ja/success_normal_b.wav) |
+| 成功-复杂 A | 少し込み入っていましたが、対応は完了しています。 | 虽然有些复杂，但处理已完成了。 | [试听](desktop/assets/voice/ja/success_heavy_a.wav) |
+| 成功-复杂 B | いくつか手順を進めましたが、無事にまとまりました。 | 推进了几个步骤，但顺利完成了。 | [试听](desktop/assets/voice/ja/success_heavy_b.wav) |
+| 部分问题 | 対応は進みましたが、いくつか確認事項が残っています。 | 处理已有进展，但还有几项待确认。 | [试听](desktop/assets/voice/ja/partial_issue_a.wav) |
+| 严重失败 | 申し訳ありません今回はそのまま完了できませんでした。 | 非常抱歉。这次无法直接完成。 | [试听](desktop/assets/voice/ja/hard_failure_a.wav) |
 
 ---
 
