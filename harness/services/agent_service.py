@@ -55,14 +55,15 @@ class AgentService:
         effective_subagent_enabled = self._config.runtime.subagents_enabled if subagent_enabled is None else subagent_enabled
         include_task_tool = effective_subagent_enabled and subagent_depth == 0
         mcp_tools = self._mcp_service.get_runtime_tools()
+        local_browser_enabled = self._config.local_browser.enabled and not self._mcp_service.is_server_enabled("playwright")
         registry = ToolRegistry.with_default_tools(
             sandbox,
             local_browser_client=LocalBrowserClient(
-                enabled=self._config.local_browser.enabled,
+                enabled=local_browser_enabled,
                 search_engine_template=self._config.local_browser.search_engine,
                 allowed_domains=self._config.local_browser.allowed_domains,
             ),
-            local_browser_enabled=self._config.local_browser.enabled,
+            local_browser_enabled=local_browser_enabled,
             knowledge_base=knowledge_base,
             include_task_tool=include_task_tool,
             extra_tools=mcp_tools,

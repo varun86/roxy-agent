@@ -53,9 +53,17 @@ def test_build_system_instructions_includes_long_term_memory_when_present():
 def test_build_system_instructions_includes_browser_tool_governance():
     instructions = build_system_instructions([])
 
-    assert "browser_search is for opening the host browser to search on the user's machine" in instructions
-    assert "browser_search and browser_open only perform local browser actions" in instructions
+    assert "Some runs expose local browser-opening tools such as browser_search and browser_open." in instructions
+    assert "Local browser-opening tools only perform host browser actions" in instructions
     assert "Do not say that a browser page was opened unless the corresponding browser tool call actually succeeded." in instructions
+
+
+def test_build_system_instructions_switches_to_playwright_browser_governance():
+    instructions = build_system_instructions([], local_browser_enabled=False, playwright_mcp_enabled=True)
+
+    assert "Playwright MCP browser tools are available in this run." in instructions
+    assert "browser_search and browser_open are intentionally not registered" in instructions
+    assert "prefer the visible Playwright-prefixed tools instead" in instructions
 
 
 def test_build_system_instructions_includes_reminder_tool_governance():

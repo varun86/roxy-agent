@@ -29,3 +29,4 @@ desktop/dist
 desktop/src/renderer-dist
 /artifacts
 /data
+/.playwright-mcp

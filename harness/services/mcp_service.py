@@ -35,3 +35,8 @@ class McpService:
 
     def get_runtime_tools(self) -> list[McpToolAdapter]:
         return get_cached_mcp_tools(str(self.config_path))
+
+    def is_server_enabled(self, server_name: str) -> bool:
+        config = ExtensionsConfig.from_file(str(self.config_path))
+        server = config.mcp_servers.get(server_name)
+        return bool(server and server.enabled)
