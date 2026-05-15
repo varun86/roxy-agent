@@ -9,7 +9,7 @@ from harness.memory import format_memory_for_injection, get_memory_data
 from harness.models.types import RuntimeContext
 from harness.rag import KnowledgeBaseService
 from harness.sandbox.runtime import BasicSandbox
-from harness.scheduler import ReminderScheduler
+from harness.tools.reminder import ReminderScheduler
 
 
 class HarnessRuntimeService:

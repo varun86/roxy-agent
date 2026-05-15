@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from harness.rag.service import KnowledgeBaseService
-    from harness.scheduler import ReminderScheduler
+    from harness.tools.reminder import ReminderScheduler
 
 
 @dataclass(slots=True)

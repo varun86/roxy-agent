@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from APP.service.chat_service import ChatService
-from harness.scheduler import ReminderScheduler
+from harness.tools.reminder import ReminderScheduler
 
 
 class FakeHarnessClient:

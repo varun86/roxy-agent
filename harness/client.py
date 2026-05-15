@@ -5,7 +5,6 @@ from typing import Any, Awaitable, Callable
 
 from harness.config.settings import HarnessConfig, load_harness_config
 from harness.context import ThreadRuntimePaths
-from harness.scheduler import ReminderScheduler
 from harness.services import (
     AgentService,
     HarnessRuntimeService,
@@ -14,6 +13,7 @@ from harness.services import (
     SkillService,
     SubagentService,
 )
+from harness.tools.reminder import ReminderScheduler
 
 
 def resolve_project_root(start_path: Path) -> Path:

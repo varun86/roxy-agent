@@ -131,6 +131,11 @@ export default function PetApp() {
     let vrm: LoadedVrm | null = null;
     let activeAction: THREE.AnimationAction | null = null;
     let activeActionKey: VrmaActionKey | null = null;
+    // Cache loaded VRMA clips to avoid re-loading
+    const vrmaCache = new Map<VrmaActionKey, THREE.AnimationClip>();
+    // Track in-flight loading promises to prevent duplicate loads
+    const vrmaLoadingPromises = new Map<VrmaActionKey, Promise<THREE.AnimationClip>>();
+    // Map from action key to the AnimationAction for playback
     const actionMap = new Map<VrmaActionKey, THREE.AnimationAction>();
     let blinkTimer = 1.4;
     let blinkWeight = 0;
@@ -194,8 +199,47 @@ export default function PetApp() {
       }
     };
 
-    const activateAction = (key: VrmaActionKey, mode: ActionPlaybackMode) => {
-      const nextAction = actionMap.get(key);
+    const ensureVrmaLoaded = async (key: VrmaActionKey): Promise<THREE.AnimationClip | null> => {
+      if (key === "random") return null;
+      if (vrmaCache.has(key)) return vrmaCache.get(key)!;
+
+      if (vrmaLoadingPromises.has(key)) {
+        return vrmaLoadingPromises.get(key)!;
+      }
+
+      const entry = VRMA_ACTIONS[key];
+      if (!entry?.url) return null;
+
+      const vrmaLoader = new GLTFLoader();
+      vrmaLoader.register((parser: any) => new VRMAnimationLoaderPlugin(parser));
+
+      const loadPromise = loadVrmaClip(vrmaLoader, vrm!, entry.url).then((clip) => {
+        vrmaCache.set(key, clip);
+        vrmaLoadingPromises.delete(key);
+        return clip;
+      }).catch((err) => {
+        console.error(`[PetApp] Failed to load VRMA ${key}:`, err);
+        vrmaLoadingPromises.delete(key);
+        throw err;
+      });
+
+      vrmaLoadingPromises.set(key, loadPromise);
+      return loadPromise;
+    };
+
+    const activateAction = async (key: VrmaActionKey, mode: ActionPlaybackMode) => {
+      if (key !== "random") {
+        await ensureVrmaLoaded(key);
+      }
+      let nextAction = actionMap.get(key);
+      if (!nextAction && key !== "random") {
+        const clip = vrmaCache.get(key);
+        if (clip && mixer) {
+          nextAction = mixer.clipAction(clip);
+          nextAction.clampWhenFinished = false;
+          actionMap.set(key, nextAction);
+        }
+      }
       if (!nextAction) return;
 
       if (activeAction && activeAction !== nextAction) {
@@ -226,12 +270,12 @@ export default function PetApp() {
       activeActionKey = key;
     };
 
-    const unsubscribeStateChange = window.electronAPI.onStateChange((state) => {
+    const unsubscribeStateChange = window.electronAPI.onStateChange(async (state) => {
       if (!isPetVisualState(state)) {
         return;
       }
       stateRef.current = state;
-      activateAction(state, state === "thinking" ? "loop" : "hold");
+      await activateAction(state, state === "thinking" ? "loop" : "hold");
     });
 
     const unsubscribeRandomAction = window.electronAPI.onPlayRandomAction((actionKey, assetUrl) => {
@@ -334,26 +378,11 @@ export default function PetApp() {
 
         mixer = new THREE.AnimationMixer(vrm.scene);
 
-        const vrmaLoader = new GLTFLoader();
-        vrmaLoader.register((parser: any) => new VRMAnimationLoaderPlugin(parser));
-
-        const entries = (Object.entries(VRMA_ACTIONS) as [VrmaActionKey, { url: string; label: string }][])
-            .filter(([key]) => key !== "random");
-        const loadedVrm = vrm;
-        await Promise.all(
-          entries.map(async ([key, entry]) => {
-            const clip = await loadVrmaClip(vrmaLoader, loadedVrm, entry.url);
-            if (disposed || !mixer) return;
-            const nextAction = mixer.clipAction(clip);
-            nextAction.clampWhenFinished = false;
-            actionMap.set(key, nextAction);
-          }),
-        );
-
         if (!disposed) {
-          activateAction(stateRef.current, stateRef.current === "thinking" ? "loop" : "hold");
           resize();
           animate();
+          // Trigger initial state animation - will lazily load the VRMA
+          await activateAction(stateRef.current, stateRef.current === "thinking" ? "loop" : "hold");
         }
       } catch (error) {
         console.error("Failed to initialize 3D pet:", error);

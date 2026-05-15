@@ -12,7 +12,7 @@ from APP.service.runtime.service import AppRuntimeService
 from harness.client import HarnessClient
 from harness.memory import get_memory_queue
 from harness.models.types import AgentRunResult
-from harness.scheduler import Reminder
+from harness.tools.reminder import Reminder
 
 
 class ChatService:
@@ -80,6 +80,33 @@ class ChatService:
 
     async def get_reminder(self, reminder_id: str) -> Reminder | None:
         return await self._reminder.get_reminder(reminder_id)
+
+    async def list_reminders(self, *, include_cancelled: bool = False) -> list[Reminder]:
+        return await self._reminder.list_reminders(include_cancelled=include_cancelled)
+
+    async def update_reminder(
+        self,
+        reminder_id: str,
+        *,
+        title: str | None = None,
+        message: str | None = None,
+        trigger_at: str | None = None,
+        timezone: str | None = None,
+        recurrence_frequency: str | None = None,
+        recurrence_interval: int | None = None,
+    ) -> Reminder:
+        return await self._reminder.update_reminder(
+            reminder_id,
+            title=title,
+            message=message,
+            trigger_at=trigger_at,
+            timezone=timezone,
+            recurrence_frequency=recurrence_frequency,
+            recurrence_interval=recurrence_interval,
+        )
+
+    async def delete_reminder(self, reminder_id: str) -> Reminder:
+        return await self._reminder.delete_reminder(reminder_id)
 
 
 _service: ChatService | None = None

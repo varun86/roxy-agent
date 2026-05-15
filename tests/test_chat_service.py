@@ -9,7 +9,7 @@ import pytest
 from APP.service.chat_service import ChatService
 from harness.context import normalize_thread_id
 from harness.models.types import AgentRunResult, AgentTrace
-from harness.scheduler import ReminderScheduler
+from harness.tools.reminder import ReminderScheduler
 
 
 class FakeHarnessClient:

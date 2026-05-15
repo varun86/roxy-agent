@@ -13,5 +13,8 @@ def test_build_api_router_includes_all_expected_routes():
     assert "/mcp/config" in paths
     assert "/conversations" in paths
     assert "/conversations/{thread_id}" in paths
+    assert "/reminders" in paths
     assert "/reminders/{reminder_id}" in paths
+    assert "/reminders/update" in paths
+    assert "/reminders/delete" in paths
     assert "/health" in paths

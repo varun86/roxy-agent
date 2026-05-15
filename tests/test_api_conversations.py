@@ -10,7 +10,7 @@ import APP.service.chat_service as chat_service_module
 from APP.api.app import create_app
 from APP.service.chat_service import ChatService
 from harness.models.types import AgentRunResult, AgentTrace
-from harness.scheduler import ReminderScheduler
+from harness.tools.reminder import ReminderScheduler
 
 
 class FakeHarnessClient:
@@ -139,6 +139,50 @@ def test_reminder_endpoint_returns_detail(tmp_path):
     payload = response.json()
     assert payload["id"] == created.id
     assert payload["message"] == "Drink water"
+    assert payload["kind"] == "one_time"
+
+
+def test_reminder_endpoints_support_list_update_and_delete(tmp_path):
+    service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
+    app_module._service = service
+    chat_service_module._service = service
+    client = TestClient(create_app())
+
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    created = asyncio.run(
+        service._client.reminders.create_reminder(
+            title="Hydrate",
+            message="Drink water",
+            trigger_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            thread_id="thread-a",
+        )
+    )
+
+    list_response = client.get("/reminders")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == created.id
+
+    update_response = client.post(
+        "/reminders/update",
+        json={
+            "reminder_id": created.id,
+            "message": "Drink warm water",
+            "recurrence_frequency": "daily",
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["message"] == "Drink warm water"
+    assert update_response.json()["kind"] == "recurring"
+
+    delete_response = client.post("/reminders/delete", json={"reminder_id": created.id})
+    assert delete_response.status_code == 200
+    assert delete_response.json()["status"] == "cancelled"
+
+    list_with_cancelled = client.get("/reminders", params={"include_cancelled": "true"})
+    assert list_with_cancelled.status_code == 200
+    assert list_with_cancelled.json()[0]["status"] == "cancelled"
 
 
 def test_mcp_config_endpoints_work(tmp_path):

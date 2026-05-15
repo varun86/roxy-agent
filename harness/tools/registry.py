@@ -143,12 +143,19 @@ class ToolRegistry:
             trigger_at = str(args.get("trigger_at", "")).strip()
             timezone = str(args.get("timezone", "Asia/Shanghai")).strip() or "Asia/Shanghai"
             title = str(args.get("title", "")).strip() or None
+            recurrence_frequency_raw = args.get("recurrence_frequency")
+            recurrence_frequency = (
+                str(recurrence_frequency_raw).strip() if recurrence_frequency_raw is not None else None
+            ) or None
+            recurrence_interval = int(args.get("recurrence_interval", 1))
             reminder = await runtime.context.reminders.create_reminder(
                 message=message,
                 trigger_at=trigger_at,
                 timezone=timezone,
                 title=title,
                 thread_id=runtime.context.thread_id,
+                recurrence_frequency=recurrence_frequency,
+                recurrence_interval=recurrence_interval,
             )
             if runtime.emit_event is not None:
                 maybe = runtime.emit_event(
@@ -166,9 +173,61 @@ class ToolRegistry:
                     await maybe
             return (
                 "Reminder created. "
-                f"id={reminder.id}; title={reminder.title}; "
+                f"id={reminder.id}; kind={reminder.kind}; title={reminder.title}; "
                 f"trigger_at={reminder.trigger_at}; message={reminder.message}"
             )
+
+        async def list_reminders_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
+            if runtime.context.reminders is None:
+                raise RuntimeError("Reminder scheduler is unavailable.")
+            include_cancelled = bool(args.get("include_cancelled", False))
+            reminders = await runtime.context.reminders.list_reminders(include_cancelled=include_cancelled)
+            if not reminders:
+                return "No reminders found."
+            lines: list[str] = []
+            for reminder in sorted(reminders, key=lambda item: item.trigger_at):
+                recurrence = "one-time"
+                if reminder.recurrence is not None:
+                    recurrence = f"{reminder.recurrence.frequency}/{reminder.recurrence.interval}"
+                lines.append(
+                    f"id={reminder.id}; status={reminder.status}; kind={reminder.kind}; recurrence={recurrence}; "
+                    f"trigger_at={reminder.trigger_at}; title={reminder.title}; message={reminder.message}"
+                )
+            return "\n".join(lines)
+
+        async def update_reminder_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
+            if runtime.context.reminders is None:
+                raise RuntimeError("Reminder scheduler is unavailable.")
+            reminder_id = str(args.get("reminder_id", "")).strip()
+            if not reminder_id:
+                raise RuntimeError("reminder_id is required")
+            recurrence_frequency_raw = args.get("recurrence_frequency")
+            recurrence_interval_raw = args.get("recurrence_interval")
+            reminder = await runtime.context.reminders.update_reminder(
+                reminder_id,
+                title=str(args.get("title")).strip() if args.get("title") is not None else None,
+                message=str(args.get("message")).strip() if args.get("message") is not None else None,
+                trigger_at=str(args.get("trigger_at")).strip() if args.get("trigger_at") is not None else None,
+                timezone=str(args.get("timezone")).strip() if args.get("timezone") is not None else None,
+                recurrence_frequency=(
+                    str(recurrence_frequency_raw).strip() if recurrence_frequency_raw is not None else None
+                ),
+                recurrence_interval=int(recurrence_interval_raw) if recurrence_interval_raw is not None else None,
+            )
+            return (
+                "Reminder updated. "
+                f"id={reminder.id}; kind={reminder.kind}; title={reminder.title}; "
+                f"trigger_at={reminder.trigger_at}; message={reminder.message}"
+            )
+
+        async def delete_reminder_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
+            if runtime.context.reminders is None:
+                raise RuntimeError("Reminder scheduler is unavailable.")
+            reminder_id = str(args.get("reminder_id", "")).strip()
+            if not reminder_id:
+                raise RuntimeError("reminder_id is required")
+            reminder = await runtime.context.reminders.delete_reminder(reminder_id)
+            return f"Reminder deleted. id={reminder.id}; status={reminder.status}; title={reminder.title}"
 
         async def task_tool(runtime: ToolRuntime, args: dict[str, Any]) -> str:
             if runtime.context.subagent_depth > 0:
@@ -347,11 +406,11 @@ class ToolRegistry:
             ToolSpec(
                 name="create_reminder",
                 description=(
-                    "Create a one-time future reminder that will notify the user after this chat turn ends. "
+                    "Create a future reminder that will notify the user after this chat turn ends. "
                     "Call this whenever the user explicitly asks to be reminded later, notified at a future time, "
-                    "woken up later, or given a timer, alarm, countdown, or delayed nudge. "
+                    "woken up later, or given a timer, alarm, countdown, delayed nudge, or recurring reminder. "
                     "Examples: '10分钟后提醒我开会', 'tomorrow at 8am remind me to stretch', "
-                    "or '半小时后叫我取快递'. Convert relative times like 'in 30 minutes' into an absolute ISO 8601 "
+                    "'半小时后叫我取快递', or '每天早上 9 点提醒我喝水'. Convert relative times like 'in 30 minutes' into an absolute ISO 8601 "
                     "trigger_at before calling this tool. If the user asks you to set the reminder, you should call this "
                     "tool instead of only promising to remember it. Never claim the reminder is scheduled unless this tool "
                     "call actually succeeded."
@@ -375,11 +434,84 @@ class ToolRegistry:
                             "type": "string",
                             "description": "Short display title for the reminder card.",
                         },
+                        "recurrence_frequency": {
+                            "type": "string",
+                            "description": "Optional recurring cadence: daily, weekly, or monthly.",
+                        },
+                        "recurrence_interval": {
+                            "type": "integer",
+                            "description": "Optional interval for recurring reminders. Default: 1.",
+                        },
                     },
                     "required": ["message", "trigger_at"],
                 },
             ),
             create_reminder_tool,
+        )
+        registry.register(
+            ToolSpec(
+                name="list_reminders",
+                description=(
+                    "List the user's reminders. Call this when the user asks what reminders are scheduled, "
+                    "wants to inspect existing reminders before editing or deleting one, or asks whether a reminder already exists."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "include_cancelled": {
+                            "type": "boolean",
+                            "description": "Whether to include cancelled reminders. Default: false.",
+                        }
+                    },
+                },
+            ),
+            list_reminders_tool,
+        )
+        registry.register(
+            ToolSpec(
+                name="update_reminder",
+                description=(
+                    "Update an existing pending reminder in place. Call this when the user asks to change a reminder's "
+                    "time, title, message, or recurrence without deleting it first. Never claim the reminder changed unless this tool call succeeded."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "reminder_id": {"type": "string", "description": "Reminder id to update."},
+                        "message": {"type": "string", "description": "Replacement reminder message."},
+                        "trigger_at": {"type": "string", "description": "Replacement absolute ISO 8601 datetime."},
+                        "timezone": {"type": "string", "description": "Replacement IANA timezone."},
+                        "title": {"type": "string", "description": "Replacement display title."},
+                        "recurrence_frequency": {
+                            "type": "string",
+                            "description": "Replacement recurring cadence: daily, weekly, or monthly. Omit to keep current recurrence.",
+                        },
+                        "recurrence_interval": {
+                            "type": "integer",
+                            "description": "Replacement recurring interval. Omit to keep current interval.",
+                        },
+                    },
+                    "required": ["reminder_id"],
+                },
+            ),
+            update_reminder_tool,
+        )
+        registry.register(
+            ToolSpec(
+                name="delete_reminder",
+                description=(
+                    "Cancel an existing reminder. Call this when the user asks to delete, cancel, remove, or stop a reminder. "
+                    "Never claim the reminder was deleted unless this tool call succeeded."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "reminder_id": {"type": "string", "description": "Reminder id to cancel."},
+                    },
+                    "required": ["reminder_id"],
+                },
+            ),
+            delete_reminder_tool,
         )
 
         if include_task_tool:

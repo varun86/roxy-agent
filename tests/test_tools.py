@@ -7,9 +7,9 @@ import pytest
 from harness.models.types import RuntimeContext, ToolCall
 from harness.mcp.tools import McpToolAdapter
 from harness.sandbox.runtime import BasicSandbox
-from harness.scheduler import ReminderScheduler
 from harness.tools.executor import ToolExecutor
 from harness.tools.local_browser import LocalBrowserClient
+from harness.tools.reminder import ReminderScheduler
 from harness.tools.registry import ToolRegistry, ToolRuntime, ToolSpec
 from harness.tools.web_search import WebSearchClient
 
@@ -189,6 +189,9 @@ async def test_tool_registry_supports_create_reminder(tmp_path):
     tool_names = {item["function"]["name"] for item in registry.list_tool_schemas()}
     reminders_list = await reminders.list_reminders()
     assert "create_reminder" in tool_names
+    assert "list_reminders" in tool_names
+    assert "update_reminder" in tool_names
+    assert "delete_reminder" in tool_names
     assert result.is_error is False
     assert "Reminder created" in result.output
     assert reminders_list[0].thread_id == "thread-a"
@@ -219,6 +222,8 @@ def test_tool_schema_descriptions_emphasize_browser_and_reminder_triggers(tmp_pa
     browser_search = schemas["browser_search"]
     browser_open = schemas["browser_open"]
     reminder = schemas["create_reminder"]
+    update_reminder = schemas["update_reminder"]
+    delete_reminder = schemas["delete_reminder"]
 
     assert "Examples:" in browser_search
     assert "Never claim the browser was opened unless this tool call actually succeeded." in browser_search
@@ -226,6 +231,41 @@ def test_tool_schema_descriptions_emphasize_browser_and_reminder_triggers(tmp_pa
     assert "Never say a page has been opened unless this tool call actually succeeded." in browser_open
     assert "Examples:" in reminder
     assert "Never claim the reminder is scheduled unless this tool call actually succeeded." in reminder
+    assert "Never claim the reminder changed unless this tool call succeeded." in update_reminder
+    assert "Never claim the reminder was deleted unless this tool call succeeded." in delete_reminder
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_supports_update_list_and_delete_reminder(tmp_path):
+    sandbox = BasicSandbox(tmp_path)
+    reminders = ReminderScheduler(tmp_path / "reminders.json")
+    registry = ToolRegistry.with_default_tools(sandbox)
+    executor = ToolExecutor(registry, ToolRuntime(sandbox=sandbox, context=RuntimeContext(thread_id="thread-a", reminders=reminders)))
+    trigger_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+    created = await reminders.create_reminder(message="Initial", trigger_at=trigger_at, thread_id="thread-a")
+
+    update_result = await executor.execute_tool_call(
+        ToolCall(
+            id="12",
+            name="update_reminder",
+            arguments={"reminder_id": created.id, "message": "Updated", "recurrence_frequency": "daily"},
+        )
+    )
+    list_result = await executor.execute_tool_call(ToolCall(id="13", name="list_reminders", arguments={}))
+    delete_result = await executor.execute_tool_call(
+        ToolCall(id="14", name="delete_reminder", arguments={"reminder_id": created.id})
+    )
+    deleted = await reminders.get_reminder(created.id)
+
+    assert update_result.is_error is False
+    assert "Reminder updated" in update_result.output
+    assert list_result.is_error is False
+    assert created.id in list_result.output
+    assert "recurrence=daily/1" in list_result.output
+    assert delete_result.is_error is False
+    assert "Reminder deleted" in delete_result.output
+    assert deleted is not None
+    assert deleted.status == "cancelled"
 
 
 @pytest.mark.asyncio
