@@ -244,6 +244,8 @@ export default function DialogApp() {
   const [isConversationSheetOpen, setIsConversationSheetOpen] = useState(false);
   const [activeReminder, setActiveReminder] = useState<ReminderDetail | null>(null);
   const [isReminderLoading, setIsReminderLoading] = useState(false);
+  const [ttsStatus, setTtsStatus] = useState<Awaited<ReturnType<typeof window.electronAPI.getRoxyRealtimeTtsStatus>> | null>(null);
+  const [isTtsToggling, setIsTtsToggling] = useState(false);
 
   const messagesContainerRef = useRef<HTMLElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -394,6 +396,15 @@ export default function DialogApp() {
           }
         } catch (error) {
           console.warn("Could not load models:", error);
+        }
+
+        try {
+          const nextTtsStatus = await window.electronAPI.getRoxyRealtimeTtsStatus();
+          if (!disposed) {
+            setTtsStatus(nextTtsStatus);
+          }
+        } catch (error) {
+          console.warn("Could not load TTS status:", error);
         }
       } catch (error) {
         console.warn("Backend not available:", error);
@@ -700,6 +711,43 @@ export default function DialogApp() {
     window.electronAPI.playVoiceKey("hard_failure_a");
   };
 
+  const formatTtsError = (error: unknown) => {
+    if (!(error instanceof Error)) return "TTS 启动失败，请检查服务配置。";
+    try {
+      const parsed = JSON.parse(error.message);
+      if (typeof parsed?.detail === "string") return parsed.detail;
+    } catch {
+      // keep the original message
+    }
+    return error.message || "TTS 启动失败，请检查服务配置。";
+  };
+
+  const toggleRealtimeTts = async () => {
+    if (!isOnline || isTtsToggling) return;
+    setIsTtsToggling(true);
+    try {
+      const nextStatus = ttsStatus?.enabled
+        ? await window.electronAPI.disableRoxyRealtimeTts()
+        : await window.electronAPI.enableRoxyRealtimeTts();
+      setTtsStatus(nextStatus);
+      setStatusDetail(nextStatus.enabled ? "实时 TTS 已开启" : "实时 TTS 已关闭");
+    } catch (error) {
+      console.error("Failed to toggle realtime TTS:", error);
+      const message = formatTtsError(error);
+      setTtsStatus({ enabled: false, service_running: false, last_error: message });
+      pushMessage({
+        id: createId("assistant"),
+        role: "assistant",
+        content: `实时 TTS 启动失败：${message}`,
+        isError: true,
+        includeInHistory: false,
+      });
+    } finally {
+      setIsTtsToggling(false);
+      messageInputRef.current?.focus();
+    }
+  };
+
   const sendMessage = async (message: string) => {
     if (!message || isStreaming || !isOnline) return;
 
@@ -773,7 +821,9 @@ export default function DialogApp() {
           if (resolvedThreadId) {
             await refreshConversationSummary(resolvedThreadId, finalText);
           }
-          playVoiceForDone(event.trace ?? null);
+          if (!ttsStatus?.enabled) {
+            playVoiceForDone(event.trace ?? null);
+          }
           continue;
         }
 
@@ -873,6 +923,22 @@ export default function DialogApp() {
         </div>
 
         <div className="floating-controls">
+          <button
+            type="button"
+            className={`floating-btn tts-toggle${ttsStatus?.enabled ? " active" : ""}`}
+            aria-label={ttsStatus?.enabled ? "Disable realtime TTS" : "Enable realtime TTS"}
+            title={ttsStatus?.enabled ? "实时 TTS 已开启" : "开启实时 TTS"}
+            disabled={!isOnline || isTtsToggling}
+            onClick={() => {
+              void toggleRealtimeTts();
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M5 10v4h3l4 3V7l-4 3H5Z" strokeLinejoin="round" />
+              <path d="M16 9.5c.8.7 1.2 1.5 1.2 2.5s-.4 1.8-1.2 2.5" strokeLinecap="round" />
+              <path d="M18.5 7c1.4 1.3 2.1 3 2.1 5s-.7 3.7-2.1 5" strokeLinecap="round" />
+            </svg>
+          </button>
           <button
             type="button"
             className={`floating-btn${isConversationSheetOpen ? " active" : ""}`}

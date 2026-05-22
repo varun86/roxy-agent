@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -75,6 +76,12 @@ class FakeStreamingHarnessClient(FakeHarnessClient):
         if event_callback is not None:
             await event_callback({"type": "task_completed", "task_id": "task_1", "result": "done"})
         return AgentRunResult(text="hello", trace=AgentTrace(tool_calls=1))
+
+
+class FakeTtsMarkerHarnessClient(FakeHarnessClient):
+    async def run_async(self, prompt: str, model_name: str | None = None, **kwargs) -> AgentRunResult:
+        self.calls.append({"prompt": prompt, "model_name": model_name, **kwargs})
+        return AgentRunResult(text="整理好了。\n<roxy_tts_ja>はい、きちんと整えました。</roxy_tts_ja>")
 
 
 @pytest.mark.asyncio
@@ -221,3 +228,71 @@ async def test_chat_service_memory_queue_failure_does_not_break_chat(tmp_path):
         result = await service.run_chat("hello", thread_id="thread-a")
 
     assert result.text == "reply:hello"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_skips_realtime_tts_plugin_when_disabled(tmp_path):
+    client = FakeHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+    plugin = service._runtime.plugin_manager.get_plugin("roxy_realtime_tts")
+    plugin.enabled = False
+    synthesize = AsyncMock()
+    plugin.synthesize_and_play = synthesize
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello", thread_id="thread-a")
+        await asyncio.sleep(0)
+
+    synthesize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_service_runs_realtime_tts_plugin_after_reply(tmp_path):
+    client = FakeTtsMarkerHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+    plugin = service._runtime.plugin_manager.get_plugin("roxy_realtime_tts")
+    plugin.enabled = True
+    synthesize = AsyncMock(return_value={"output_path": "/tmp/roxy.wav"})
+    plugin.synthesize_and_play = synthesize
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello", thread_id="thread-a")
+        await asyncio.sleep(0)
+
+    assert client.calls[0]["realtime_tts_enabled"] is True
+    assert service.get_conversation("thread-a").messages[1].content == "整理好了。"
+    synthesize.assert_awaited_once_with("はい、きちんと整えました。")
+
+
+@pytest.mark.asyncio
+async def test_chat_service_realtime_tts_falls_back_when_marker_missing(tmp_path):
+    client = FakeHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+    plugin = service._runtime.plugin_manager.get_plugin("roxy_realtime_tts")
+    plugin.enabled = True
+    synthesize = AsyncMock(return_value={"output_path": "/tmp/roxy.wav"})
+    plugin.synthesize_and_play = synthesize
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello", thread_id="thread-a")
+        await asyncio.sleep(0)
+
+    assert service.get_conversation("thread-a").messages[1].content == "reply:hello"
+    synthesize.assert_awaited_once_with("はい、整いました。")
+
+
+@pytest.mark.asyncio
+async def test_chat_service_does_not_request_tts_marker_when_plugin_disabled(tmp_path):
+    client = FakeHarnessClient(tmp_path / ".sandbox")
+    service = ChatService(client=client)
+    plugin = service._runtime.plugin_manager.get_plugin("roxy_realtime_tts")
+    plugin.enabled = False
+    fake_queue = SimpleNamespace(add=lambda **kwargs: None)
+
+    with patch("APP.service.chat_service.get_memory_queue", return_value=fake_queue):
+        await service.run_chat("hello", thread_id="thread-a")
+
+    assert client.calls[0]["realtime_tts_enabled"] is False

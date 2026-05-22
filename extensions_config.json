@@ -28,5 +28,14 @@
     "example-skill": {
       "enabled": true
     }
+  },
+  "plugins": {
+    "roxy_realtime_tts": {
+      "enabled": false,
+      "config": {
+        "text_lang": "ja",
+        "pet_play_url": "http://127.0.0.1:23333/play-tts"
+      }
+    }
   }
 }

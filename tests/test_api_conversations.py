@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -211,3 +211,49 @@ def test_mcp_config_endpoints_work(tmp_path):
     )
     assert update_response.status_code == 200
     assert "playwright" in update_response.json()["mcp_servers"]
+
+
+def test_roxy_realtime_tts_plugin_endpoints_work(tmp_path):
+    service = ChatService(client=FakeHarnessClient(tmp_path / ".sandbox"))
+    app_module._service = service
+    chat_service_module._service = service
+    client = TestClient(create_app())
+    plugin = service._runtime.plugin_manager.get_plugin("roxy_realtime_tts")
+    plugin.enabled = False
+
+    enable = AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {
+        "plugin_id": "roxy_realtime_tts",
+        "enabled": True,
+        "service_running": True,
+        "last_error": None,
+    }))
+    test = AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {
+        "plugin_id": "roxy_realtime_tts",
+        "enabled": True,
+        "service_running": True,
+        "last_error": None,
+    }))
+    plugin.enable = enable
+    plugin.test = test
+
+    status_response = client.get("/plugins/roxy_realtime_tts/status")
+    assert status_response.status_code == 200
+    assert status_response.json()["plugin_id"] == "roxy_realtime_tts"
+    assert status_response.json()["enabled"] is False
+    assert "last_tts_text" in status_response.json()
+    assert "last_source" in status_response.json()
+    assert "last_output_path" in status_response.json()
+    assert "last_playback_ok" in status_response.json()
+
+    enable_response = client.post("/plugins/roxy_realtime_tts/enable")
+    assert enable_response.status_code == 200
+    assert enable_response.json()["enabled"] is True
+
+    test_response = client.post("/plugins/roxy_realtime_tts/test", json={"text": "hello"})
+    assert test_response.status_code == 200
+    assert test_response.json()["service_running"] is True
+    test.assert_awaited_once_with({"text": "hello"})
+
+    disable_response = client.post("/plugins/roxy_realtime_tts/disable")
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False

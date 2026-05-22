@@ -124,9 +124,29 @@ class SkillStateConfig:
 
 
 @dataclass(slots=True)
+class PluginStateConfig:
+    enabled: bool = False
+    config: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_value(cls, value: Any) -> "PluginStateConfig":
+        if isinstance(value, dict):
+            raw_config = value.get("config", {})
+            return cls(
+                enabled=bool(value.get("enabled", False)),
+                config=dict(raw_config) if isinstance(raw_config, dict) else {},
+            )
+        return cls(enabled=bool(value), config={})
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "config": dict(self.config)}
+
+
+@dataclass(slots=True)
 class ExtensionsConfig:
     mcp_servers: dict[str, McpServerConfig] = field(default_factory=dict)
     skills: dict[str, SkillStateConfig] = field(default_factory=dict)
+    plugins: dict[str, PluginStateConfig] = field(default_factory=dict)
 
     @classmethod
     def resolve_config_path(cls, config_path: str | None = None) -> Path | None:
@@ -179,7 +199,13 @@ class ExtensionsConfig:
         if isinstance(skill_items, dict):
             for name, value in skill_items.items():
                 skills[name] = SkillStateConfig.from_value(value)
-        return cls(mcp_servers=mcp_servers, skills=skills)
+
+        plugin_items = resolved.get("plugins", {})
+        plugins: dict[str, PluginStateConfig] = {}
+        if isinstance(plugin_items, dict):
+            for name, value in plugin_items.items():
+                plugins[name] = PluginStateConfig.from_value(value)
+        return cls(mcp_servers=mcp_servers, skills=skills, plugins=plugins)
 
     @classmethod
     def resolve_env_variables(cls, value: Any) -> Any:
@@ -206,6 +232,7 @@ class ExtensionsConfig:
         return {
             "mcpServers": {name: server.to_dict() for name, server in self.mcp_servers.items()},
             "skills": {name: skill.to_dict() for name, skill in self.skills.items()},
+            "plugins": {name: plugin.to_dict() for name, plugin in self.plugins.items()},
         }
 
 

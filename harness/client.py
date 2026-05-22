@@ -96,6 +96,8 @@ class HarnessClient:
         event_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         thread_id: str | None = None,
         current_user_message: str = "",
+        realtime_tts_enabled: bool = False,
+        realtime_tts_prompt: str | None = None,
     ):
         return self._agent_service.build_agent(
             model_name,
@@ -111,6 +113,8 @@ class HarnessClient:
             event_callback=event_callback,
             thread_id=thread_id,
             current_user_message=current_user_message,
+            realtime_tts_enabled=realtime_tts_enabled,
+            realtime_tts_prompt=realtime_tts_prompt,
         )
 
     async def _run_subagent(
@@ -149,6 +153,8 @@ class HarnessClient:
         pinned_skills: list[str] | None = None,
         compact_summary: str | None = None,
         event_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        realtime_tts_enabled: bool = False,
+        realtime_tts_prompt: str | None = None,
     ):
         return await self._agent_service.run_async(
             prompt,
@@ -160,6 +166,8 @@ class HarnessClient:
             pinned_skills=pinned_skills,
             compact_summary=compact_summary,
             event_callback=event_callback,
+            realtime_tts_enabled=realtime_tts_enabled,
+            realtime_tts_prompt=realtime_tts_prompt,
         )
 
     def run(self, prompt: str, model_name: str | None = None):

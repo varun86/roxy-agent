@@ -74,6 +74,20 @@ def test_build_system_instructions_includes_reminder_tool_governance():
     assert "Never claim that a reminder has been scheduled unless create_reminder actually succeeded." in instructions
 
 
+def test_build_system_instructions_adds_realtime_tts_marker_contract_when_enabled():
+    instructions = build_system_instructions([], realtime_tts_enabled=True)
+
+    assert "<realtime_tts>" in instructions
+    assert "<roxy_tts_ja>短い日本語の台詞</roxy_tts_ja>" in instructions
+    assert "Use Japanese only inside the tag" in instructions
+
+
+def test_build_system_instructions_omits_realtime_tts_marker_contract_by_default():
+    instructions = build_system_instructions([])
+
+    assert "<roxy_tts_ja>" not in instructions
+
+
 def test_build_system_instructions_discourages_stage_directions_for_task_completion():
     instructions = build_system_instructions([])
 
