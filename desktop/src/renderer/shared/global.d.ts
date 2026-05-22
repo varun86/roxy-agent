@@ -96,6 +96,18 @@ type ReminderOpenPayload = {
   threadId?: string | null;
 };
 
+type PluginStatus = {
+  plugin_id: string;
+  enabled: boolean;
+  service_running: boolean;
+  last_error?: string | null;
+  details?: Record<string, unknown>;
+  last_tts_text?: string | null;
+  last_source?: string | null;
+  last_output_path?: string | null;
+  last_playback_ok?: boolean | null;
+};
+
 interface ElectronAPI {
   dragLock: (locked: boolean) => void;
   dragMove: () => void;
@@ -134,6 +146,9 @@ interface ElectronAPI {
   fetchReminder: (reminderId: string) => Promise<ReminderDetail>;
   createConversation: () => Promise<ConversationSummary>;
   deleteConversation: (threadId: string) => Promise<{ status: string; thread_id: string }>;
+  getRoxyRealtimeTtsStatus: () => Promise<PluginStatus>;
+  enableRoxyRealtimeTts: () => Promise<PluginStatus>;
+  disableRoxyRealtimeTts: () => Promise<PluginStatus>;
   healthCheck: () => Promise<boolean>;
 }
 

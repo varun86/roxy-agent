@@ -19,7 +19,11 @@ class ChatService:
     def __init__(self, client: HarnessClient | None = None) -> None:
         project_root = Path(__file__).resolve().parents[2]
         harness_client = client or HarnessClient(project_root=project_root)
-        self._runtime = AppRuntimeService(harness_client, memory_queue_getter=lambda config: get_memory_queue(config))
+        self._runtime = AppRuntimeService(
+            harness_client,
+            memory_queue_getter=lambda config: get_memory_queue(config),
+            project_root=project_root,
+        )
         self._chat = ChatDomainService(self._runtime)
         self._conversation = ConversationService(self._runtime)
         self._mcp = McpService(harness_client)
@@ -71,6 +75,18 @@ class ChatService:
 
     def list_models(self) -> list[dict[str, Any]]:
         return self._model.list_models()
+
+    def get_plugin_status(self, plugin_id: str) -> dict[str, Any]:
+        return self._runtime.plugin_manager.status(plugin_id).to_dict()
+
+    async def enable_plugin(self, plugin_id: str) -> dict[str, Any]:
+        return (await self._runtime.plugin_manager.enable(plugin_id)).to_dict()
+
+    def disable_plugin(self, plugin_id: str) -> dict[str, Any]:
+        return self._runtime.plugin_manager.disable(plugin_id).to_dict()
+
+    async def test_plugin(self, plugin_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return (await self._runtime.plugin_manager.test(plugin_id, payload)).to_dict()
 
     async def start_reminders(self) -> None:
         await self._reminder.start()

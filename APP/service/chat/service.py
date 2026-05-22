@@ -38,6 +38,7 @@ class ChatDomainService:
                 if tool_event is not None:
                     tool_events.append(tool_event)
 
+            realtime_prompt_text = self.runtime.get_realtime_prompt_text()
             result = await self.runtime.client.run_async(
                 message,
                 model,
@@ -47,7 +48,11 @@ class ChatDomainService:
                 pinned_skills=context.pinned_skills,
                 compact_summary=context.compact_summary,
                 event_callback=on_event,
+                realtime_tts_enabled=bool(realtime_prompt_text),
+                realtime_tts_prompt=realtime_prompt_text,
             )
+            visible_text, control_payloads = self.runtime.plugin_manager.extract_control_payloads(result.text)
+            result.text = visible_text
 
             self.runtime.context_store.update_after_turn(
                 context,
@@ -57,12 +62,13 @@ class ChatDomainService:
                 available_skill_names=self.runtime.client.list_enabled_skill_names(),
                 context_path=thread_paths.context_file,
             )
+            trace_info = self.runtime.build_trace_info(result)
             self.runtime.conversation_store.append_turn(
                 resolved_thread_id,
                 user_message=message,
                 assistant_message=result.text,
                 assistant_tool_events=tool_events,
-                assistant_trace=self.runtime.build_trace_info(result),
+                assistant_trace=trace_info,
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
             )
@@ -73,6 +79,12 @@ class ChatDomainService:
                 history=history,
             )
             result.thread_id = resolved_thread_id
+            asyncio.create_task(self.runtime.run_after_assistant_message_hooks(
+                visible_text=result.text,
+                control_payloads=control_payloads,
+                thread_id=resolved_thread_id,
+                trace=trace_info,
+            ))
             return result
 
     async def run_chat_stream(
@@ -108,6 +120,7 @@ class ChatDomainService:
             )
             context = self.runtime.context_store.load(resolved_thread_id, context_path=thread_paths.context_file)
             history = self.runtime.build_history(resolved_thread_id, messages=messages)
+            realtime_prompt_text = self.runtime.get_realtime_prompt_text()
             task = asyncio.create_task(
                 self.runtime.client.run_async(
                     message,
@@ -119,6 +132,8 @@ class ChatDomainService:
                     pinned_skills=context.pinned_skills,
                     compact_summary=context.compact_summary,
                     event_callback=on_event,
+                    realtime_tts_enabled=bool(realtime_prompt_text),
+                    realtime_tts_prompt=realtime_prompt_text,
                 )
             )
 
@@ -133,6 +148,8 @@ class ChatDomainService:
                     continue
 
             result = await task
+            visible_text, control_payloads = self.runtime.plugin_manager.extract_control_payloads(result.text)
+            result.text = visible_text
             self.runtime.context_store.update_after_turn(
                 context,
                 user_message=message,
@@ -141,12 +158,13 @@ class ChatDomainService:
                 available_skill_names=self.runtime.client.list_enabled_skill_names(),
                 context_path=thread_paths.context_file,
             )
+            trace_info = self.runtime.build_trace_info(result)
             self.runtime.conversation_store.append_turn(
                 resolved_thread_id,
                 user_message=message,
                 assistant_message=result.text,
                 assistant_tool_events=tool_events,
-                assistant_trace=self.runtime.build_trace_info(result),
+                assistant_trace=trace_info,
                 conversation_path=thread_paths.conversation_file,
                 messages_path=thread_paths.messages_file,
             )
@@ -157,6 +175,12 @@ class ChatDomainService:
                 history=history,
             )
             result.thread_id = resolved_thread_id
+            asyncio.create_task(self.runtime.run_after_assistant_message_hooks(
+                visible_text=result.text,
+                control_payloads=control_payloads,
+                thread_id=resolved_thread_id,
+                trace=trace_info,
+            ))
 
         yield {
             "type": "done",

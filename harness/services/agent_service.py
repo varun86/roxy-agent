@@ -48,6 +48,8 @@ class AgentService:
         event_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         thread_id: str | None = None,
         current_user_message: str = "",
+        realtime_tts_enabled: bool = False,
+        realtime_tts_prompt: str | None = None,
     ) -> AsyncAgentLoop:
         selected_model = self._config.get_model(model_name)
         sandbox = self._runtime_service.make_sandbox(thread_paths)
@@ -114,6 +116,10 @@ class AgentService:
             memory_text=self._runtime_service.build_memory_text(current_user_message),
             subagent_enabled=include_task_tool,
             max_concurrent_subagents=self._config.runtime.max_concurrent_subagents,
+            local_browser_enabled=local_browser_enabled,
+            playwright_mcp_enabled=self._mcp_service.is_server_enabled("playwright"),
+            realtime_tts_enabled=realtime_tts_enabled,
+            realtime_tts_prompt=realtime_tts_prompt,
         )
 
         return AsyncAgentLoop(
@@ -142,6 +148,8 @@ class AgentService:
         pinned_skills: list[str] | None = None,
         compact_summary: str | None = None,
         event_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        realtime_tts_enabled: bool = False,
+        realtime_tts_prompt: str | None = None,
     ) -> AgentRunResult:
         agent = self.build_agent(
             model_name,
@@ -151,6 +159,8 @@ class AgentService:
             event_callback=event_callback,
             thread_id=thread_id,
             current_user_message=prompt,
+            realtime_tts_enabled=realtime_tts_enabled,
+            realtime_tts_prompt=realtime_tts_prompt,
         )
         return await agent.run_with_stream(
             prompt,

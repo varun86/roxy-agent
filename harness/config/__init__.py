@@ -1,6 +1,6 @@
 """Configuration layer for harness."""
 
-from harness.config.extensions_config import ExtensionsConfig, SkillStateConfig
+from harness.config.extensions_config import ExtensionsConfig, PluginStateConfig, SkillStateConfig
 from harness.config.settings import (
     HarnessConfig,
     MemoryConfig,
@@ -12,6 +12,7 @@ from harness.config.settings import (
 
 __all__ = [
 	"ExtensionsConfig",
+	"PluginStateConfig",
 	"SkillStateConfig",
 	"HarnessConfig",
 	"MemoryConfig",

@@ -165,6 +165,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return response.json();
     },
 
+    getRoxyRealtimeTtsStatus: async () => {
+        const response = await fetch(`${API_BASE_URL}/plugins/roxy_realtime_tts/status`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    },
+
+    enableRoxyRealtimeTts: async () => {
+        const response = await fetch(`${API_BASE_URL}/plugins/roxy_realtime_tts/enable`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `HTTP ${response.status}`);
+        }
+        return response.json();
+    },
+
+    disableRoxyRealtimeTts: async () => {
+        const response = await fetch(`${API_BASE_URL}/plugins/roxy_realtime_tts/disable`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    },
+
     // Health check
     healthCheck: async () => {
         const response = await fetch(`${API_BASE_URL}/health`);

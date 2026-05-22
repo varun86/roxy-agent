@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from pathlib import Path
 from typing import Any, Callable
 
+from APP.plugins.manager import AppPluginManager
 from harness.client import HarnessClient
 from harness.context import (
     ConversationStore,
@@ -22,9 +24,14 @@ class AppRuntimeService:
         client: HarnessClient,
         *,
         memory_queue_getter: Callable[[Any], Any],
+        project_root: Path,
     ) -> None:
         self.client = client
         self._memory_queue_getter = memory_queue_getter
+        self.plugin_manager = AppPluginManager(
+            project_root=project_root,
+            fallback_tts_line_generator=self.generate_fallback_tts_line,
+        )
         runtime = self.client.config.runtime
         self.context_store = ThreadContextStore(
             max_recent_messages=runtime.max_recent_messages,
@@ -84,6 +91,53 @@ class AppRuntimeService:
         try:
             queue = self._memory_queue_getter(self.client.config)
             queue.add(thread_id=thread_id, messages=payload)
+        except Exception:
+            return
+
+    def get_realtime_prompt_text(self) -> str | None:
+        return self.plugin_manager.get_realtime_prompt_text()
+
+    async def generate_fallback_tts_line(self, visible_text: str) -> str:
+        prompt = (
+            "请根据下面这轮助手回复，生成一句适合桌宠 Roxy 朗读的简短日文台词。\n"
+            "要求：只输出日文台词本身；45 个日文字符以内；自然、温柔、带一点角色扮演感；"
+            "不要包含中文、Markdown、代码、文件路径、XML 标签或解释。\n\n"
+            f"助手回复：{visible_text}"
+        )
+        agent = self.client._build_agent(
+            None,
+            instructions_override=(
+                "You generate one short Japanese spoken line for a desktop pet. "
+                "Return only the Japanese line, no explanation."
+            ),
+            tool_allowlist=[],
+            max_steps_override=1,
+            subagent_enabled=False,
+        )
+        result = await agent.run(prompt, history_messages=[])
+        return result.text
+
+    async def run_after_assistant_message_hooks(
+        self,
+        *,
+        visible_text: str,
+        control_payloads: dict[str, Any],
+        thread_id: str,
+        trace: ConversationTrace,
+    ) -> None:
+        try:
+            await self.plugin_manager.after_assistant_message(
+                visible_text=visible_text,
+                control_payloads=control_payloads,
+                thread_id=thread_id,
+                trace={
+                    "steps": trace.steps,
+                    "tool_calls": trace.tool_calls,
+                    "errors": trace.errors,
+                    "subagent_calls": trace.subagent_calls,
+                    "subagent_errors": trace.subagent_errors,
+                },
+            )
         except Exception:
             return
 

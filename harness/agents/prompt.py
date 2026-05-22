@@ -169,6 +169,24 @@ def get_runtime_clock_section(*, timezone: str = "Asia/Shanghai") -> str:
     )
 
 
+def get_browser_governance_section(*, local_browser_enabled: bool = True, playwright_mcp_enabled: bool = False) -> str:
+    if playwright_mcp_enabled and not local_browser_enabled:
+        return (
+            "<browser_governance>\n"
+            "Playwright MCP browser tools are available in this run. "
+            "browser_search and browser_open are intentionally not registered, so prefer the visible "
+            "Playwright-prefixed tools instead.\n"
+            "</browser_governance>"
+        )
+    return (
+        "<browser_governance>\n"
+        "Some runs expose local browser-opening tools such as browser_search and browser_open. "
+        "Local browser-opening tools only perform host browser actions and do not read webpage contents back. "
+        "Do not say that a browser page was opened unless the corresponding browser tool call actually succeeded.\n"
+        "</browser_governance>"
+    )
+
+
 def get_subagent_section(*, max_concurrent_subagents: int) -> str:
     return (
         "<subagent_system>\n"
@@ -190,6 +208,10 @@ def build_system_instructions(
     memory_text: str | None = None,
     subagent_enabled: bool = False,
     max_concurrent_subagents: int = 3,
+    local_browser_enabled: bool = True,
+    playwright_mcp_enabled: bool = False,
+    realtime_tts_enabled: bool = False,
+    realtime_tts_prompt: str | None = None,
 ) -> str:
     section = get_skills_prompt_section(skills, container_base_path=container_base_path)
     context_section = get_context_governance_section(
@@ -200,6 +222,12 @@ def build_system_instructions(
 
     parts = [BASE_INSTRUCTIONS]
     parts.append(get_runtime_clock_section())
+    parts.append(
+        get_browser_governance_section(
+            local_browser_enabled=local_browser_enabled,
+            playwright_mcp_enabled=playwright_mcp_enabled,
+        )
+    )
     if section:
         parts.append(section)
     if pinned_skills or compact_summary:
@@ -208,4 +236,19 @@ def build_system_instructions(
         parts.append(memory_section)
     if subagent_enabled:
         parts.append(get_subagent_section(max_concurrent_subagents=max_concurrent_subagents))
+    if realtime_tts_enabled:
+        parts.append(
+            realtime_tts_prompt
+            or (
+                "<realtime_tts>\n"
+                "Realtime desktop-pet TTS is enabled for this run. At the very end of every final assistant reply, "
+                "append exactly one hidden host-control line in this format:\n"
+                "<roxy_tts_ja>短い日本語の台詞</roxy_tts_ja>\n"
+                "The Japanese line must be one short, natural, roleplay-friendly Roxy-style utterance for speaking aloud. "
+                "Use Japanese only inside the tag, keep it under 45 Japanese characters, and do not put task details, "
+                "file paths, code, markdown, XML, or Chinese inside the tag. Keep the normal user-visible answer in the "
+                "user's language outside the tag.\n"
+                "</realtime_tts>"
+            )
+        )
     return "\n\n".join(parts)
